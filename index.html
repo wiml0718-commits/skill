@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
 <meta name="apple-mobile-web-app-title" content="技能樹"/>
 <meta name="theme-color" content="#050b12"/>
-<link rel="manifest" href="skill/manifest.json"/>
+<link rel="manifest" href="manifest.json"/>
 <link rel="apple-touch-icon" href="icon-192.png"/>
 <title>人生技能樹</title>
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet"/>
@@ -1159,44 +1159,67 @@ const QUEST_TYPES = {
   daily: {label:"每日任務", icon:"🌟", color:"#10b981", bg:"#10b981"},
 };
 
-let questFilter = "all"; // all | main | side | daily | done
+let questFilter = "all"; // all | main | side | daily | done | archive
 
 function renderQuests(){
   if(!state.quests)state.quests=[];
   const now = new Date(); now.setHours(0,0,0,0);
 
   // For daily: never truly "done", show all dailies under daily tab
-  const isActive = q => q.type==="daily" ? true : !q.done;
+  const isActive = q => q.type==="daily" ? true : !q.done && !q.archived;
   const filtered = state.quests.filter(q=>{
-    if(questFilter==="done")  return q.done && q.type!=="daily";
-    if(questFilter==="daily") return q.type==="daily";
-    if(questFilter==="all")   return isActive(q);
+    if(questFilter==="done")    return q.done && q.type!=="daily" && !q.archived;
+    if(questFilter==="archive") return q.archived===true;
+    if(questFilter==="daily")   return q.type==="daily";
+    if(questFilter==="all")     return isActive(q);
     return isActive(q) && q.type===questFilter;
   });
 
   const counts={
-    all:   state.quests.filter(q=>isActive(q)).length,
-    main:  state.quests.filter(q=>!q.done&&q.type==="main").length,
-    side:  state.quests.filter(q=>!q.done&&q.type==="side").length,
-    daily: state.quests.filter(q=>q.type==="daily").length,
-    done:  state.quests.filter(q=>q.done&&q.type!=="daily").length,
+    all:     state.quests.filter(q=>isActive(q)).length,
+    main:    state.quests.filter(q=>!q.done&&!q.archived&&q.type==="main").length,
+    side:    state.quests.filter(q=>!q.done&&!q.archived&&q.type==="side").length,
+    daily:   state.quests.filter(q=>q.type==="daily").length,
+    done:    state.quests.filter(q=>q.done&&q.type!=="daily"&&!q.archived).length,
+    archive: state.quests.filter(q=>q.archived===true).length,
   };
 
   const tabs=[
-    {k:"all",  label:`全部 (${counts.all})`},
-    {k:"main", label:`⚔️ 主線 (${counts.main})`},
-    {k:"side", label:`🗺️ 支線 (${counts.side})`},
-    {k:"daily",label:`🌟 每日 (${counts.daily})`},
-    {k:"done", label:`✓ 完成 (${counts.done})`},
+    {k:"all",     label:`全部 (${counts.all})`},
+    {k:"main",    label:`⚔️ 主線 (${counts.main})`},
+    {k:"side",    label:`🗺️ 支線 (${counts.side})`},
+    {k:"daily",   label:`🌟 每日 (${counts.daily})`},
+    {k:"done",    label:`✓ 完成 (${counts.done})`},
+    {k:"archive", label:`📦 封存 (${counts.archive})`},
   ].map(t=>`<button class="qtab ${questFilter===t.k?"active":""}"
-    style="${questFilter===t.k?`background:${t.k==="done"?"#22d3ee":"#4a9eff"}22;border-color:${t.k==="done"?"#22d3ee":"#4a9eff"};color:${t.k==="done"?"#22d3ee":"#4a9eff"}`:""}"
+    style="${questFilter===t.k?`background:${t.k==="archive"?"#f59e0b":t.k==="done"?"#22d3ee":"#4a9eff"}22;border-color:${t.k==="archive"?"#f59e0b":t.k==="done"?"#22d3ee":"#4a9eff"};color:${t.k==="archive"?"#f59e0b":t.k==="done"?"#22d3ee":"#4a9eff"}`:""}"
     onclick="questFilter='${t.k}';render()">${t.label}</button>`).join("");
 
   let cards="";
   if(filtered.length===0){
     cards=`<div class="empty-state" style="margin-top:20px">
-      ${questFilter==="done"?"尚無完成的任務":"沒有進行中的任務<br><small>點右下角 + 新增任務</small>"}
+      ${questFilter==="done"?"尚無完成的任務":questFilter==="archive"?"尚無封存的任務":"沒有進行中的任務<br><small>點右下角 + 新增任務</small>"}
     </div>`;
+  } else if(questFilter==="archive"){
+    // Sort by completedAt desc, group by year-month
+    const sorted=[...filtered].sort((a,b)=>new Date(b.completedAt||b.createdAt||0)-new Date(a.completedAt||a.createdAt||0));
+    let lastMonthKey="";
+    cards=sorted.map(q=>{
+      const dateStr=q.completedAt||q.createdAt||"";
+      const d=dateStr?new Date(dateStr):null;
+      const monthKey=d?`${d.getFullYear()}-${d.getMonth()}`:"";
+      const monthLabel=d?`${d.getFullYear()} 年 ${d.getMonth()+1} 月`:"";
+      let divider="";
+      if(monthKey!==lastMonthKey){
+        lastMonthKey=monthKey;
+        divider=`<div style="display:flex;align-items:center;gap:8px;margin:16px 0 10px">
+          <div style="flex:1;height:1px;background:linear-gradient(90deg,#f59e0b44,transparent)"></div>
+          <span style="font-size:10px;color:#f59e0b;letter-spacing:2px;white-space:nowrap">📦 ${monthLabel}</span>
+          <div style="flex:1;height:1px;background:linear-gradient(90deg,transparent,#f59e0b44)"></div>
+        </div>`;
+      }
+      return divider+renderQuestCard(q,now);
+    }).join("");
   } else if(questFilter==="daily"||questFilter==="all"){
     // Split daily into undone / done-today
     const dailyUndone=filtered.filter(q=>q.type==="daily"&&!isDailyDoneToday(q));
@@ -1214,12 +1237,26 @@ function renderQuests(){
     cards=filtered.map(q=>renderQuestCard(q,now)).join("");
   }
 
-  const doneCnt=state.quests.filter(q=>q.done&&q.type!=="daily").length;
+  const doneCnt=state.quests.filter(q=>q.done&&q.type!=="daily"&&!q.archived).length;
+  const archiveCnt=state.quests.filter(q=>q.archived===true).length;
   const clearBtn=questFilter==="done"&&doneCnt>0
-    ?`<button onclick="clearDoneQuests()"
+    ?`<div style="display:flex;gap:6px;margin-bottom:10px">
+        <button onclick="archiveAllDone()"
+          style="flex:1;background:#1a1000;border:1px solid #f59e0b55;color:#f59e0b;
+          border-radius:8px;padding:9px;cursor:pointer;font-size:11px;font-family:'Share Tech Mono',monospace">
+          📦 全部封存 (${doneCnt})
+        </button>
+        <button onclick="clearDoneQuests()"
+          style="flex:1;background:#1a0808;border:1px solid #ef444455;color:#ef4444;
+          border-radius:8px;padding:9px;cursor:pointer;font-size:11px;font-family:'Share Tech Mono',monospace">
+          🗑 全部清除 (${doneCnt})
+        </button>
+      </div>`
+    :questFilter==="archive"&&archiveCnt>0
+    ?`<button onclick="clearArchived()"
         style="width:100%;background:#1a0808;border:1px solid #ef444455;color:#ef4444;
         border-radius:8px;padding:9px;cursor:pointer;font-size:11px;margin-bottom:10px;font-family:'Share Tech Mono',monospace">
-        🗑 清除所有已完成任務 (${doneCnt})
+        🗑 清除所有封存 (${archiveCnt})
       </button>`
     :"";
 
@@ -1267,6 +1304,11 @@ function renderQuestCard(q, now){
     dailyMeta=`<span style="font-size:9px;color:var(--muted2);margin-left:6px">${[streakStr,countStr].filter(Boolean).join(" · ")}</span>`;
   }
 
+  // Format createdAt for display
+  const createdLabel=q.createdAt
+    ?`<span style="font-size:9px;color:var(--muted2)">📌 ${new Date(q.createdAt).toLocaleDateString("zh-TW",{year:"numeric",month:"numeric",day:"numeric"})}</span>`
+    :"";
+
   return `<div class="quest-card ${cardDone?"done":""} ${isOverdue?"overdue":""}" onclick="openEditQuest(${q.id})">
     <div style="position:absolute;top:0;left:0;width:3px;height:100%;background:${qt.color};border-radius:12px 0 0 12px"></div>
     <div style="padding-left:6px">
@@ -1277,6 +1319,7 @@ function renderQuestCard(q, now){
         ${isDailyDone?'<span class="daily-done-badge">✓ 今日已完成</span>':""}
         ${q.done&&q.type!=="daily"?'<span style="font-size:9px;color:#10b981;margin-left:2px">✓ 已完成</span>':""}
         ${dailyMeta}
+        ${createdLabel}
       </div>
       <div class="quest-title ${cardDone?"done-strike":""}">${q.title}</div>
       ${q.desc?`<div class="quest-desc">${q.desc}</div>`:""}
@@ -1285,7 +1328,13 @@ function renderQuestCard(q, now){
           ${rewardHtml}
           ${dueHtml}
         </div>
-        ${!q.done?`<button class="quest-complete-btn"
+        ${q.done&&!q.archived?`<button class="quest-complete-btn"
+          style="background:#f59e0b18;border:1px solid #f59e0b55;color:#f59e0b"
+          onclick="event.stopPropagation();archiveQuest(${q.id})">📦 封存</button>`:""}
+        ${q.archived?`<button class="quest-complete-btn"
+          style="background:#22d3ee18;border:1px solid #22d3ee55;color:#22d3ee"
+          onclick="event.stopPropagation();unarchiveQuest(${q.id})">↩ 取消封存</button>`:""}
+        ${!q.done&&!q.archived?`<button class="quest-complete-btn"
           style="background:${completeBtnDisabled?"#1e3a4a":qt.color+"22"};
           border:1px solid ${completeBtnDisabled?"#2a4a6a":qt.color+"66"};
           color:${completeBtnDisabled?"var(--muted)":qt.color};
@@ -1520,6 +1569,36 @@ function saveQuest(){
   }
   saveState();closeModal();render();
 }
+
+function archiveQuest(id){
+  const q=state.quests.find(x=>x.id===id);
+  if(!q)return;
+  q.archived=true;
+  q.archivedAt=new Date().toISOString();
+  saveState(true);render();showToast("📦 已封存任務");
+}
+function unarchiveQuest(id){
+  const q=state.quests.find(x=>x.id===id);
+  if(!q)return;
+  q.archived=false;q.archivedAt=null;
+  saveState(true);render();showToast("↩ 已取消封存");
+}
+function archiveAllDone(){
+  const cnt=state.quests.filter(q=>q.done&&q.type!=="daily"&&!q.archived).length;
+  if(!confirm(`確定封存所有 ${cnt} 個已完成任務？`))return;
+  const now=new Date().toISOString();
+  state.quests.forEach(q=>{
+    if(q.done&&q.type!=="daily"&&!q.archived){q.archived=true;q.archivedAt=now;}
+  });
+  saveState(true);render();showToast(`📦 已封存 ${cnt} 個任務`);
+}
+function clearArchived(){
+  const cnt=state.quests.filter(q=>q.archived).length;
+  if(!confirm(`確定永久清除所有 ${cnt} 個封存任務？此操作無法復原。`))return;
+  state.quests=state.quests.filter(q=>!q.archived);
+  saveState(true);render();showToast(`🗑 已清除 ${cnt} 個封存任務`);
+}
+
 
 function clearDoneQuests(){
   const cnt=state.quests.filter(q=>q.done&&q.type!=="daily").length;
