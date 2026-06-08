@@ -1,0 +1,1570 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="技能樹"/>
+<meta name="theme-color" content="#050b12"/>
+<link rel="manifest" href="manifest.json"/>
+<link rel="apple-touch-icon" href="icon-192.png"/>
+<title>人生技能樹</title>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet"/>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+:root{
+  --bg:#050b12;--bg2:#0a1520;--bg3:#0f1f30;
+  --border:#1e3a4a;--border2:#2a4a6a;
+  --text:#e8dcc8;--text2:#8aaccа;--muted:#3a5a7a;--muted2:#2a4a6a;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bot: env(safe-area-inset-bottom, 0px);
+}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:'Share Tech Mono',monospace;}
+#app{height:100%;display:flex;flex-direction:column;}
+
+/* ── Nav Bar ── */
+#navbar{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:calc(12px + var(--safe-top)) 16px 10px;
+  background:linear-gradient(180deg,#0a1a2a,var(--bg));
+  border-bottom:1px solid var(--border);
+  flex-shrink:0;
+}
+.nav-title{font-family:'Cinzel',serif;font-size:15px;letter-spacing:2px;color:var(--text);}
+.nav-sub{font-size:9px;letter-spacing:3px;color:#4a9eff;margin-top:2px;}
+.nav-stat{text-align:right;}
+.nav-stat-val{font-family:'Cinzel',serif;font-size:16px;color:#f59e0b;}
+.nav-stat-lbl{font-size:8px;color:var(--muted);margin-top:1px;}
+
+/* ── Tab Bar ── */
+#tabbar{
+  display:flex;border-top:1px solid var(--border);
+  padding-bottom:var(--safe-bot);background:var(--bg2);flex-shrink:0;
+}
+.tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:10px 4px;cursor:pointer;transition:all .2s;border:none;background:none;color:var(--muted);font-size:8px;letter-spacing:1px;gap:3px;}
+.tab.active{color:#4a9eff;}
+.tab-icon{font-size:18px;}
+
+/* ── Main Content ── */
+#content{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:14px 14px calc(10px + var(--safe-bot));}
+
+/* ── Core Card (list) ── */
+.core-card{
+  background:linear-gradient(135deg,var(--bg3),var(--bg2));
+  border:1px solid var(--border);border-radius:14px;
+  padding:14px;margin-bottom:10px;cursor:pointer;transition:all .25s;
+  position:relative;overflow:hidden;
+}
+.core-card:active{transform:scale(.98);}
+.core-card.selected{border-color:var(--card-color);}
+.core-card-bg{position:absolute;top:-30px;right:-30px;width:100px;height:100px;border-radius:50%;
+  background:radial-gradient(circle,var(--card-color-faint),transparent);}
+.core-row{display:flex;align-items:center;gap:12px;}
+.core-icon{font-size:28px;width:44px;height:44px;display:flex;align-items:center;justify-content:center;
+  background:var(--bg);border-radius:10px;border:1px solid var(--border);flex-shrink:0;}
+.core-info{flex:1;min-width:0;}
+.core-name{font-family:'Cinzel',serif;font-size:14px;font-weight:700;color:var(--text);}
+.core-title{font-size:10px;letter-spacing:2px;margin-top:1px;}
+.core-right{text-align:right;flex-shrink:0;}
+.core-lv{font-family:'Cinzel',serif;font-size:22px;font-weight:900;}
+.core-lv-lbl{font-size:8px;color:var(--muted);margin-top:1px;}
+.xp-bar-wrap{margin-top:8px;height:4px;background:var(--bg);border-radius:2px;overflow:hidden;border:1px solid var(--border);}
+.xp-bar{height:100%;border-radius:2px;transition:width .6s ease;}
+.xp-label{display:flex;justify-content:space-between;margin-top:3px;}
+.xp-label span{font-size:8px;color:var(--muted2);}
+
+/* ── Detail Page ── */
+.detail-header{
+  border-radius:14px;padding:18px;margin-bottom:12px;
+  background:linear-gradient(135deg,var(--bg3),var(--bg2));
+  border:1px solid var(--border);position:relative;overflow:hidden;
+}
+.detail-header-bg{position:absolute;top:-50px;right:-50px;width:180px;height:180px;border-radius:50%;
+  background:radial-gradient(circle,var(--card-color-faint),transparent);pointer-events:none;}
+.detail-top{display:flex;align-items:center;gap:14px;margin-bottom:14px;}
+.detail-icon{font-size:40px;}
+.detail-name{font-family:'Cinzel',serif;font-size:20px;font-weight:700;}
+.detail-title{font-size:11px;letter-spacing:2px;margin-top:3px;}
+.detail-desc{font-size:11px;color:var(--muted);margin-top:4px;}
+.lv-ring-wrap{flex-shrink:0;text-align:center;}
+.lv-ring-lbl{font-size:8px;margin-top:3px;}
+
+/* big xp block */
+.xp-block{background:var(--bg);border-radius:10px;padding:12px 14px;border:1px solid var(--border);margin-bottom:12px;}
+.xp-block-top{display:flex;justify-content:space-between;margin-bottom:8px;font-size:10px;color:var(--muted);}
+.xp-big-bar{height:10px;background:var(--bg2);border-radius:5px;overflow:hidden;border:1px solid var(--border);}
+.xp-big-fill{height:100%;border-radius:5px;transition:width .8s ease;}
+.lv-dots{display:flex;gap:5px;margin-top:8px;justify-content:center;}
+.lv-dot{width:8px;height:8px;border-radius:50%;transition:all .3s;}
+
+/* ── Sub skill card ── */
+.sub-card{
+  background:var(--bg);border-radius:10px;padding:12px;
+  border:1px solid var(--border);cursor:pointer;transition:all .2s;margin-bottom:8px;
+}
+.sub-card:active{transform:scale(.98);}
+.sub-row{display:flex;align-items:flex-start;gap:10px;}
+.sub-icon{font-size:22px;width:36px;height:36px;display:flex;align-items:center;justify-content:center;
+  background:var(--bg2);border-radius:8px;border:1px solid var(--border);flex-shrink:0;}
+.sub-name{font-size:14px;font-weight:700;color:var(--text);}
+.sub-desc{font-size:10px;color:var(--muted);margin-top:2px;}
+.sub-source{font-size:9px;color:var(--muted2);margin-top:2px;}
+.type-badge{font-size:9px;padding:2px 7px;border-radius:4px;margin-left:6px;vertical-align:middle;}
+.sub-xp-bar{height:3px;background:var(--bg2);border-radius:2px;overflow:hidden;margin-top:7px;}
+.sub-xp-fill{height:100%;border-radius:2px;transition:width .5s;}
+.sub-xp-row{display:flex;justify-content:space-between;margin-top:3px;font-size:8px;}
+
+/* ── Section header ── */
+.section-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;}
+.section-hd-title{font-size:10px;letter-spacing:2px;color:var(--muted);}
+.btn-add{border:none;border-radius:16px;padding:5px 14px;cursor:pointer;font-size:10px;letter-spacing:1px;font-family:'Cinzel',serif;}
+
+/* ── Modal ── */
+.modal-overlay{
+  position:fixed;inset:0;background:rgba(0,0,0,.9);
+  display:flex;align-items:flex-end;justify-content:center;
+  z-index:300;backdrop-filter:blur(6px);
+}
+.modal-sheet{
+  background:linear-gradient(160deg,#0d1f2d,var(--bg));
+  border-radius:20px 20px 0 0;border-top:1px solid var(--border2);
+  width:100%;max-height:92vh;overflow-y:auto;
+  padding:8px 18px calc(20px + var(--safe-bot));
+  animation:slideUp .3s ease;
+}
+@keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+.modal-handle{width:40px;height:4px;background:var(--border2);border-radius:2px;margin:10px auto 16px;}
+.modal-title{font-family:'Cinzel',serif;font-size:11px;letter-spacing:3px;margin-bottom:16px;}
+.form-label{font-size:10px;color:var(--muted);display:block;margin-bottom:5px;}
+.form-input{width:100%;background:var(--bg);border:1px solid var(--border2);border-radius:8px;
+  padding:10px 12px;color:var(--text);font-family:'Share Tech Mono',monospace;font-size:13px;
+  outline:none;margin-bottom:12px;}
+.form-input:focus{border-color:#4a9eff88;}
+.form-select{width:100%;background:var(--bg);border:1px solid var(--border2);border-radius:8px;
+  padding:10px 12px;color:var(--text);font-family:'Share Tech Mono',monospace;font-size:13px;
+  outline:none;margin-bottom:12px;-webkit-appearance:none;}
+.type-toggle{display:flex;gap:8px;margin-bottom:12px;}
+.type-btn{flex:1;padding:9px;border-radius:8px;cursor:pointer;font-size:11px;border:1px solid var(--border);
+  background:var(--bg);color:var(--muted);transition:all .2s;}
+.xp-input-row{display:flex;align-items:center;gap:8px;margin-bottom:4px;}
+.xp-num{width:80px;background:var(--bg);border-radius:8px;padding:10px;
+  color:#f59e0b;font-family:'Cinzel',serif;font-size:18px;font-weight:700;
+  border:1px solid #f59e0b66;outline:none;text-align:center;}
+.xp-quick{flex:1;display:flex;flex-wrap:wrap;gap:5px;}
+.xp-qbtn{border:1px solid var(--border);background:var(--bg);color:var(--muted);
+  border-radius:6px;padding:4px 9px;cursor:pointer;font-size:10px;}
+.notes-list{margin-bottom:8px;}
+.note-item{display:flex;gap:7px;align-items:flex-start;margin-bottom:6px;}
+.note-text{flex:1;background:var(--bg);border:1px solid var(--border);border-radius:6px;
+  padding:6px 9px;font-size:10px;color:#b0c8d8;line-height:1.5;}
+.note-date{font-size:8px;color:var(--muted2);display:block;margin-top:2px;}
+.note-del{background:none;border:none;color:#ef444466;cursor:pointer;font-size:14px;padding:4px;flex-shrink:0;}
+.note-add-row{display:flex;gap:6px;}
+.note-add-input{flex:1;background:var(--bg);border:1px solid var(--border);border-radius:7px;
+  padding:8px 10px;color:var(--text);font-size:11px;outline:none;font-family:'Share Tech Mono',monospace;}
+.note-add-btn{background:none;border:1px solid var(--border2);color:var(--text);
+  border-radius:7px;padding:8px 13px;cursor:pointer;font-size:16px;}
+.modal-actions{display:flex;gap:8px;margin-top:18px;}
+.btn-save{flex:1;border:none;border-radius:8px;padding:12px;cursor:pointer;
+  font-family:'Cinzel',serif;font-size:12px;letter-spacing:1px;transition:opacity .2s;}
+.btn-del{background:#1a0808;border:1px solid #ef444455;color:#ef4444;
+  border-radius:8px;padding:12px 16px;cursor:pointer;font-size:12px;}
+
+/* ── Back button ── */
+.back-btn{display:flex;align-items:center;gap:6px;background:none;border:none;
+  color:var(--muted);cursor:pointer;font-size:12px;margin-bottom:12px;padding:4px 0;}
+.back-btn:active{color:var(--text);}
+
+/* ── Empty state ── */
+.empty-state{text-align:center;color:var(--muted2);padding:30px 0;font-size:11px;
+  border:1px dashed var(--border);border-radius:10px;line-height:2;}
+
+/* ── Stats page ── */
+.stat-block{background:var(--bg3);border:1px solid var(--border);border-radius:12px;
+  padding:14px;margin-bottom:10px;}
+.stat-block-title{font-size:9px;letter-spacing:3px;color:var(--muted);margin-bottom:10px;}
+.stat-row{display:flex;justify-content:space-between;align-items:center;
+  padding:6px 0;border-bottom:1px solid var(--border);}
+.stat-row:last-child{border-bottom:none;}
+.stat-lbl{font-size:11px;color:var(--text);}
+.stat-val{font-family:'Cinzel',serif;font-size:13px;}
+.rank-bar-wrap{height:4px;background:var(--bg);border-radius:2px;overflow:hidden;margin-top:4px;}
+
+/* ── toast ── */
+#toast{position:fixed;bottom:calc(80px + var(--safe-bot));left:50%;transform:translateX(-50%);
+  background:#22d3ee22;border:1px solid #22d3ee66;color:#22d3ee;
+  padding:7px 18px;border-radius:20px;font-size:11px;
+  opacity:0;transition:opacity .3s;pointer-events:none;z-index:999;white-space:nowrap;}
+#toast.show{opacity:1;}
+
+/* scrollbar */
+::-webkit-scrollbar{width:3px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px;}
+
+/* ── Quest styles ── */
+.quest-tabs{display:flex;gap:6px;margin-bottom:14px;}
+.qtab{flex:1;padding:7px 4px;border-radius:20px;cursor:pointer;font-size:10px;
+  letter-spacing:1px;border:1px solid var(--border);background:transparent;
+  color:var(--muted);transition:all .2s;text-align:center;}
+.qtab.active{color:#fff;}
+.quest-card{border-radius:12px;padding:13px 14px;margin-bottom:9px;
+  border:1px solid var(--border);background:var(--bg3);
+  position:relative;overflow:hidden;transition:all .2s;}
+.quest-card:active{transform:scale(.98);}
+.quest-card.done{opacity:.5;}
+.quest-card.overdue{border-color:#ef444455;}
+.quest-badge{display:inline-flex;align-items:center;gap:3px;font-size:9px;
+  padding:2px 7px;border-radius:4px;font-weight:700;letter-spacing:1px;margin-bottom:7px;}
+.quest-title{font-size:14px;font-weight:700;color:var(--text);margin-bottom:3px;
+  display:flex;align-items:center;gap:7px;}
+.quest-desc{font-size:10px;color:var(--muted);margin-bottom:6px;line-height:1.5;}
+.quest-meta{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;}
+.quest-reward{font-size:10px;color:#f59e0b;}
+.quest-due{font-size:9px;}
+.quest-due.overdue{color:#ef4444;}
+.quest-due.soon{color:#f97316;}
+.quest-due.ok{color:var(--muted2);}
+.quest-complete-btn{border:none;border-radius:8px;padding:5px 11px;cursor:pointer;
+  font-size:11px;font-family:'Cinzel',serif;letter-spacing:1px;flex-shrink:0;}
+.quest-add-fab{position:fixed;bottom:calc(72px + var(--safe-bot) + 14px);right:16px;
+  width:48px;height:48px;border-radius:50%;border:none;
+  background:linear-gradient(135deg,#4a9eff,#a855f7);
+  color:#fff;font-size:24px;cursor:pointer;z-index:50;
+  box-shadow:0 4px 20px #4a9eff44;display:flex;align-items:center;justify-content:center;}
+.done-strike{text-decoration:line-through;opacity:.6;}
+
+.reward-skill-list{display:flex;flex-direction:column;gap:6px;margin-bottom:10px;}
+.reward-skill-row{display:flex;align-items:center;gap:8px;background:var(--bg);
+  border:1px solid var(--border);border-radius:8px;padding:8px 10px;}
+.reward-skill-name{flex:1;font-size:11px;color:var(--text);}
+.reward-xp-input{width:64px;background:var(--bg2);border:1px solid #f59e0b66;
+  border-radius:6px;padding:4px 6px;color:#f59e0b;font-family:"Cinzel",serif;
+  font-size:13px;font-weight:700;outline:none;text-align:center;}
+.reward-del{background:none;border:none;color:#ef444466;cursor:pointer;font-size:14px;padding:2px 4px;}
+.skill-search{width:100%;background:var(--bg);border:1px solid var(--border2);
+  border-radius:7px;padding:8px 10px;color:var(--text);font-size:12px;
+  outline:none;margin-bottom:6px;font-family:"Share Tech Mono",monospace;}
+.skill-pick-list{max-height:160px;overflow-y:auto;border:1px solid var(--border);
+  border-radius:8px;background:var(--bg);}
+.skill-pick-item{padding:9px 12px;font-size:11px;cursor:pointer;
+  border-bottom:1px solid var(--border);color:var(--text);transition:background .15s;}
+.skill-pick-item:last-child{border-bottom:none;}
+.skill-pick-item:active{background:var(--bg3);}
+.daily-done-badge{display:inline-flex;align-items:center;gap:4px;font-size:9px;
+  color:#10b981;background:#10b98118;border:1px solid #10b98144;
+  padding:2px 8px;border-radius:4px;margin-left:6px;}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="navbar">
+    <div>
+      <div class="nav-title" id="char-name-display">冒險者</div>
+      <div class="nav-sub">▸ 人生技能樹</div>
+    </div>
+    <div class="nav-stat" id="nav-stats"></div>
+  </div>
+  <div id="content"></div>
+  <div id="tabbar">
+    <button class="tab active" data-tab="skills" onclick="switchTab('skills')">
+      <span class="tab-icon">⚔️</span>技能樹
+    </button>
+    <button class="tab" data-tab="stats" onclick="switchTab('stats')">
+      <span class="tab-icon">📊</span>統計
+    </button>
+    <button class="tab" data-tab="quests" onclick="switchTab('quests')">
+      <span class="tab-icon">📜</span>任務
+    </button>
+    <button class="tab" data-tab="profile" onclick="switchTab('profile')">
+      <span class="tab-icon">🧙</span>檔案
+    </button>
+  </div>
+</div>
+<div id="toast">✓ 已儲存</div>
+
+<script>
+// ── Data ─────────────────────────────────────────────────────────────────────
+const STORAGE_KEY = "skill-pwa-v1";
+// Lv1-99 thresholds: 50*i^2 + 50*i
+const LEVEL_XP = (()=>{const a=[0];for(let i=1;i<=99;i++)a.push(50*i*i+50*i);return a;})();
+const MAX_LV = 99;
+const SUB_MAX_LV = 9;
+const LV_NAMES = (()=>{
+  const tiers=[
+    [1,5,"初學者"],[6,10,"見習生"],[11,15,"實踐者"],[16,20,"熟練者"],
+    [21,25,"進階者"],[26,30,"資深者"],[31,35,"精英"],[36,40,"大師"],
+    [41,50,"宗師"],[51,60,"傳說"],[61,70,"神話"],[71,80,"至高"],
+    [81,90,"無敵"],[91,98,"超越者"],[99,99,"神域"]
+  ];
+  const arr=[""];
+  for(let i=1;i<=99;i++){
+    const t=tiers.find(([a,b])=>i>=a&&i<=b);
+    arr.push(t?t[2]:"神域");
+  }
+  return arr;
+})();
+const CORES = [
+  {id:"body",    name:"身體管理", title:"John Wick",       icon:"🔫", color:"#ef4444"},
+  {id:"emotion", name:"情緒管理", title:"明鏡止水",         icon:"🪞", color:"#22d3ee"},
+  {id:"time",    name:"時間管理", title:"預知眼",           icon:"👁️", color:"#a855f7"},
+  {id:"think",   name:"思維能力", title:"零的領域",         icon:"🌀", color:"#6366f1"},
+  {id:"learn",   name:"學習能力", title:"識破",             icon:"📖", color:"#f59e0b"},
+  {id:"comm",    name:"溝通能力", title:"安妮亞",           icon:"🥜", color:"#ec4899"},
+  {id:"social",  name:"人際能力", title:"葬送的芙莉蓮",     icon:"🧝", color:"#10b981"},
+  {id:"finance", name:"財務能力", title:"黃金鄉的馬哈特",   icon:"💰", color:"#84cc16"},
+  {id:"lead",    name:"領導能力", title:"指揮官",           icon:"⚜️", color:"#f97316"},
+];
+const CORE_MAP = Object.fromEntries(CORES.map(c=>[c.id,c]));
+
+const DEFAULT_SUBS = [
+  {id:1,coreId:"body",   name:"重訓",    type:"active", xp:80, icon:"🏋️",desc:"每週規律訓練",notes:[],source:""},
+  {id:2,coreId:"body",   name:"睡眠管理",type:"passive",xp:40, icon:"😴",desc:"固定作息時間",notes:[],source:""},
+  {id:3,coreId:"emotion",name:"冥想",    type:"active", xp:60, icon:"🧘",desc:"每日10分鐘靜心",notes:[],source:""},
+  {id:4,coreId:"time",   name:"番茄鐘",  type:"active", xp:90, icon:"🍅",desc:"專注工作法",notes:[],source:""},
+  {id:5,coreId:"think",  name:"邏輯思維",type:"passive",xp:70, icon:"🔍",desc:"系統性分析問題",notes:[],source:""},
+  {id:6,coreId:"learn",  name:"快速閱讀",type:"active", xp:50, icon:"📚",desc:"每週一本書",notes:[],source:""},
+  {id:7,coreId:"comm",   name:"公開演講",type:"active", xp:30, icon:"🎤",desc:"台上表達練習",notes:[],source:""},
+  {id:8,coreId:"social", name:"傾聽技巧",type:"passive",xp:65, icon:"👂",desc:"主動理解他人",notes:[],source:""},
+  {id:9,coreId:"finance",name:"記帳習慣",type:"active", xp:45, icon:"📊",desc:"每日收支記錄",notes:[],source:""},
+  {id:10,coreId:"lead",  name:"目標設定",type:"active", xp:55, icon:"🎯",desc:"OKR框架應用",notes:[],source:""},
+];
+
+let state = {charName:"冒險者", subSkills:[...DEFAULT_SUBS]};
+function loadState(){
+  try{const r=localStorage.getItem(STORAGE_KEY);if(r)state=JSON.parse(r);}catch{}
+}
+let saveTimer;
+function saveState(silent=false){
+  clearTimeout(saveTimer);
+  saveTimer=setTimeout(()=>{
+    // Always persist current CORES state
+    if(!state.cores)state.cores=[...CORES];
+    try{localStorage.setItem(STORAGE_KEY,JSON.stringify(state));}catch{}
+    if(!silent)showToast("✓ 已儲存");
+  },600);
+}
+function showToast(msg,duration=1800){
+  const t=document.getElementById("toast");
+  t.textContent=msg;t.classList.add("show");
+  setTimeout(()=>t.classList.remove("show"),duration);
+}
+
+// ── Level helpers ─────────────────────────────────────────────────────────────
+function getCoreXP(coreId){return state.subSkills.filter(s=>s.coreId===coreId).reduce((a,s)=>a+(s.xp||0),0);}
+function calcLv(xp){let lv=1;for(let i=1;i<=MAX_LV;i++){if(xp>=LEVEL_XP[i])lv=i;else break;}return Math.min(lv,MAX_LV);}
+function lvProgress(xp){
+  const lv=calcLv(xp);
+  if(lv>=MAX_LV)return{lv,pct:100,cur:xp-LEVEL_XP[MAX_LV],need:0};
+  const base=LEVEL_XP[lv],next=LEVEL_XP[lv+1];
+  return{lv,pct:Math.round((xp-base)/(next-base)*100),cur:xp-base,need:next-base};
+}
+
+// ── Streak helper ─────────────────────────────────────────────────────────────
+function calcStreak(q){
+  // Returns current consecutive days streak for a daily quest
+  if(q.type!=="daily"||!q.streakHistory)return q.completedCount?1:0;
+  const today=todayStr();
+  let streak=0;
+  let check=new Date();
+  // Walk backwards from today
+  for(let i=0;i<365;i++){
+    const d=`${check.getFullYear()}-${String(check.getMonth()+1).padStart(2,"0")}-${String(check.getDate()).padStart(2,"0")}`;
+    if(q.streakHistory.includes(d)){streak++;}
+    else if(i===0){/* today not yet done is ok, keep checking */}
+    else break;
+    check.setDate(check.getDate()-1);
+  }
+  return streak;
+}
+
+function svgRing(xp,color,size=56){
+  const r=(size-8)/2,circ=2*Math.PI*r;
+  const {lv,pct}=lvProgress(xp);
+  const dash=circ*(lv>=MAX_LV?1:pct/100);
+  return `<svg width="${size}" height="${size}">
+    <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="#1e3a4a" stroke-width="4"/>
+    <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="${color}" stroke-width="4"
+      stroke-dasharray="${dash} ${circ}" stroke-linecap="round"
+      transform="rotate(-90 ${size/2} ${size/2})"
+      style="filter:drop-shadow(0 0 4px ${color})"/>
+    <text x="${size/2}" y="${size/2+1}" text-anchor="middle" dominant-baseline="middle"
+      fill="${color}" font-size="14" font-weight="700" font-family="monospace">${lv}</text>
+  </svg>`;
+}
+
+// ── Nav stats ─────────────────────────────────────────────────────────────────
+function updateNav(){
+  const totalLv=CORES.reduce((a,c)=>a+calcLv(getCoreXP(c.id)),0);
+  document.getElementById("char-name-display").textContent=state.charName;
+  document.getElementById("nav-stats").innerHTML=
+    `<div class="nav-stat-val">★ ${totalLv}</div><div class="nav-stat-lbl">總等級</div>`;
+}
+
+// ── Views ─────────────────────────────────────────────────────────────────────
+let currentTab="skills";
+let detailCore=null;
+
+function switchTab(tab){
+  currentTab=tab;detailCore=null;
+  document.querySelectorAll(".tab").forEach(t=>{
+    t.classList.toggle("active",t.dataset.tab===tab);
+  });
+  render();
+}
+
+function render(){
+  updateNav();
+  const el=document.getElementById("content");
+  try{
+    if(currentTab==="skills"){
+      if(detailCore)el.innerHTML=renderDetail(detailCore);
+      else el.innerHTML=renderCoreList();
+    }else if(currentTab==="stats"){
+      el.innerHTML=renderStats();
+    }else if(currentTab==="quests"){
+      el.innerHTML=renderQuests();
+    }else{
+      el.innerHTML=renderProfile();
+    }
+  }catch(err){
+    console.error("Render error:",err);
+    el.innerHTML=`<div style="padding:30px;color:#ef4444;font-size:12px;font-family:monospace">
+      <div style="margin-bottom:10px;font-size:16px">⚠️ 載入錯誤</div>
+      <div style="color:#5a7a9a">${err.message}</div>
+      <button onclick="currentTab='skills';detailCore=null;render()" style="margin-top:16px;
+        background:#4a9eff22;border:1px solid #4a9eff;color:#4a9eff;border-radius:8px;
+        padding:10px 20px;cursor:pointer;font-size:12px">← 返回首頁</button>
+    </div>`;
+  }
+}
+
+// ── Core List ─────────────────────────────────────────────────────────────────
+function renderCoreList(){
+  const addBtn=`<div style="margin-bottom:10px">
+    <button onclick="openAddCore()"
+      style="width:100%;background:#4a9eff18;border:1px dashed #4a9eff55;color:#4a9eff;
+      border-radius:14px;padding:12px;cursor:pointer;font-size:11px;font-family:'Cinzel',serif;letter-spacing:1px">
+      ✦ 新增核心技能
+    </button></div>`;
+  return addBtn+CORES.map(c=>{
+    const xp=getCoreXP(c.id);
+    const {lv,pct,cur,need}=lvProgress(xp);
+    const subs=state.subSkills.filter(s=>s.coreId===c.id).length;
+    const activeSubs=state.subSkills.filter(s=>s.coreId===c.id&&s.type==="active").slice(0,3);
+    const quickRow=activeSubs.length>0
+      ?`<div style="display:flex;gap:5px;margin-top:9px;flex-wrap:wrap" onclick="event.stopPropagation()">
+          ${activeSubs.map(s=>`
+            <button onclick="quickAddXP(${s.id})"
+              style="background:${c.color}15;border:1px solid ${c.color}44;color:${c.color};
+              border-radius:7px;padding:4px 9px;cursor:pointer;font-size:10px;
+              font-family:'Share Tech Mono',monospace;white-space:nowrap">
+              ${s.icon||"⚡"} ${s.name} +10
+            </button>`).join("")}
+        </div>`
+      :"";
+    return `<div class="core-card" style="--card-color:${c.color};--card-color-faint:${c.color}11"
+      onclick="openDetail('${c.id}')">
+      <div class="core-card-bg"></div>
+      <div class="core-row">
+        <div class="core-icon">${c.icon}</div>
+        <div class="core-info">
+          <div class="core-name">${c.title}</div>
+          <div class="core-title" style="color:${c.color};opacity:0.6;font-size:9px">${c.name}</div>
+          <div class="xp-bar-wrap" style="margin-top:6px">
+            <div class="xp-bar" style="width:${pct}%;background:linear-gradient(90deg,${c.color}77,${c.color});box-shadow:0 0 6px ${c.color}"></div>
+          </div>
+          <div class="xp-label">
+            <span style="color:${c.color}">${LV_NAMES[lv]}</span>
+            <span>${lv<MAX_LV?`${cur}/${need} → Lv${lv+1}`:"Lv99 MAX"}</span>
+          </div>
+        </div>
+        <div class="core-right">
+          <div class="core-lv" style="color:${c.color};font-size:16px">Lv${lv}</div>
+          <div class="core-lv-lbl" style="color:${c.color};opacity:.7">${LV_NAMES[lv]}</div>
+          <div class="core-lv-lbl" style="margin-top:3px">${subs} 技能</div>
+        </div>
+      </div>
+      ${quickRow}
+    </div>`;
+  }).join("");
+}
+
+// ── Detail ────────────────────────────────────────────────────────────────────
+function openDetail(coreId){detailCore=coreId;render();}
+
+function renderDetail(coreId){
+  const c=CORE_MAP[coreId];
+  const xp=getCoreXP(coreId);
+  const {lv,pct,cur,need}=lvProgress(xp);
+  const subs=state.subSkills.filter(s=>s.coreId===coreId);
+  const dots=[1,2,3,4,5,6,7,8,9].map(i=>
+    `<div class="lv-dot" style="width:${i<=lv?9:7}px;height:${i<=lv?9:7}px;background:${i<=lv?c.color:"#1e3a4a"};${i<=lv?`box-shadow:0 0 5px ${c.color}`:""}" title="Lv${i}"></div>`
+  ).join("");
+
+  const subCards=subs.length===0
+    ?`<div class="empty-state">尚未加入子技能<br><small>每個子技能的 EXP 都會累計到此核心技能</small></div>`
+    :subs.map(s=>{
+      const tc=s.type==="active"?"#f59e0b":"#22d3ee";
+      const ti=s.type==="active"?"⚡":"🛡️";
+      const tl=s.type==="active"?"主動":"被動";
+      const subLv=Math.min(calcLv(s.xp),SUB_MAX_LV);
+      const pct2=subLv<SUB_MAX_LV?Math.min((s.xp-LEVEL_XP[subLv])/(LEVEL_XP[subLv+1]-LEVEL_XP[subLv])*100,100):100;
+      const quickBtn=s.type==="active"
+        ?`<button onclick="event.stopPropagation();quickAddXP(${s.id})"
+            style="flex-shrink:0;background:${tc}22;border:1px solid ${tc}66;color:${tc};
+            border-radius:8px;padding:6px 10px;cursor:pointer;font-size:12px;font-weight:700;
+            font-family:'Cinzel',serif;line-height:1">+10</button>`
+        :"";
+      return `<div class="sub-card" onclick="editSub(${s.id})">
+        <div class="sub-row">
+          <div class="sub-icon">${s.icon}</div>
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:6px">
+              <span class="sub-name">${s.name} <span style="color:${c.color};font-size:11px;font-family:'Cinzel',serif">Lv${subLv}</span></span>
+              <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+                ${quickBtn}
+                <span class="type-badge" style="color:${tc};background:${tc}18;border:1px solid ${tc}44">${ti} ${tl}</span>
+              </div>
+            </div>
+            <div class="sub-desc">${s.desc||""}</div>
+            ${s.source?`<div class="sub-source">📚 ${s.source}</div>`:""}
+            <div class="sub-xp-bar"><div class="sub-xp-fill" style="width:${pct2}%;background:linear-gradient(90deg,${c.color}66,${c.color});box-shadow:0 0 5px ${c.color}"></div></div>
+            <div class="sub-xp-row"><span style="color:var(--muted2)">EXP ${s.xp} / Lv${subLv<SUB_MAX_LV?subLv+1:"MAX"} 需 ${subLv<SUB_MAX_LV?LEVEL_XP[subLv+1]:LEVEL_XP[SUB_MAX_LV]}</span><span style="color:${c.color}">${subLv<SUB_MAX_LV?`→ 還差 ${LEVEL_XP[subLv+1]-s.xp}`:"Lv9 MAX ★"}</span></div>
+          </div>
+        </div>
+        ${s.notes&&s.notes.length?`<div style="color:var(--muted2);font-size:9px;margin-top:6px">📝 ${s.notes.length} 條筆記</div>`:""}
+      </div>`;
+    }).join("");
+
+  return `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <button class="back-btn" style="margin-bottom:0" onclick="detailCore=null;render()">← 返回</button>
+      <button onclick="deleteCore('${coreId}')"
+        style="background:#1a0808;border:1px solid #ef444455;color:#ef4444;
+        border-radius:8px;padding:6px 12px;cursor:pointer;font-size:11px">
+        🗑 刪除核心技能
+      </button>
+    </div>
+    <div class="detail-header" style="--card-color:${c.color};--card-color-faint:${c.color}09">
+      <div class="detail-header-bg"></div>
+      <div class="detail-top">
+        <div>
+          <div class="detail-icon">${c.icon}</div>
+        </div>
+        <div style="flex:1">
+          <div class="detail-name">${c.title}</div>
+          <div class="detail-title" style="color:${c.color};opacity:0.6">${c.name}</div>
+          <div class="detail-desc">${c.desc||""}</div>
+        </div>
+        <div class="lv-ring-wrap">
+          ${svgRing(xp,c.color,64)}
+          <div class="lv-ring-lbl" style="color:${c.color}">${LV_NAMES[lv]}</div>
+        </div>
+      </div>
+      <div class="xp-block">
+        <div class="xp-block-top">
+          <span>總 EXP：<span style="color:${c.color};font-family:'Cinzel',serif">${xp}</span></span>
+          <span>${lv<MAX_LV?`距 Lv${lv+1} 還需 ${need-cur} EXP`:"Lv99 已達神域！"}</span>
+        </div>
+        <div class="xp-big-bar">
+          <div class="xp-big-fill" style="width:${pct}%;background:linear-gradient(90deg,${c.color}66,${c.color});box-shadow:0 0 10px ${c.color}"></div>
+        </div>
+        <div class="lv-dots">${dots}</div>
+      </div>
+    </div>
+    <div class="section-hd">
+      <span class="section-hd-title">子技能 (${subs.length})</span>
+      <div style="display:flex;gap:6px">
+        ${subs.length>=2?`<button class="btn-add" style="color:#a855f7;background:#a855f718;border:1px solid #a855f755"
+          onclick="openMergeSub('${coreId}')">⚗ 合併</button>`:""}
+        <button class="btn-add" style="color:${c.color};background:${c.color}18;border:1px solid ${c.color}55"
+          onclick="openAddSub('${coreId}')">+ 新增</button>
+      </div>
+    </div>
+    ${subCards}
+    <div style="height:10px"></div>
+  `;
+}
+
+// ── Stats ─────────────────────────────────────────────────────────────────────
+function renderStats(){
+  const sorted=[...CORES].map(c=>({...c,xp:getCoreXP(c.id),lv:calcLv(getCoreXP(c.id))}))
+    .sort((a,b)=>b.xp-a.xp);
+  const totalXP=state.subSkills.reduce((a,s)=>a+(s.xp||0),0);
+  const totalLv=CORES.reduce((a,c)=>a+calcLv(getCoreXP(c.id)),0);
+  const activeCnt=state.subSkills.filter(s=>s.type==="active").length;
+  const passiveCnt=state.subSkills.filter(s=>s.type==="passive").length;
+  const notesCnt=state.subSkills.reduce((a,s)=>a+(s.notes?s.notes.length:0),0);
+  const maxXP=sorted[0]?.xp||1;
+
+  const overview=`<div class="stat-block">
+    <div class="stat-block-title">◆ 總覽</div>
+    <div class="stat-row"><span class="stat-lbl">總等級</span><span class="stat-val" style="color:#f59e0b">★ ${totalLv}</span></div>
+    <div class="stat-row"><span class="stat-lbl">總 EXP</span><span class="stat-val" style="color:#22d3ee">${totalXP}</span></div>
+    <div class="stat-row"><span class="stat-lbl">子技能數量</span><span class="stat-val" style="color:#a855f7">${state.subSkills.length}</span></div>
+    <div class="stat-row"><span class="stat-lbl">⚡ 主動技能</span><span class="stat-val" style="color:#f59e0b">${activeCnt}</span></div>
+    <div class="stat-row"><span class="stat-lbl">🛡️ 被動技能</span><span class="stat-val" style="color:#22d3ee">${passiveCnt}</span></div>
+    <div class="stat-row"><span class="stat-lbl">📝 知識筆記</span><span class="stat-val" style="color:#ec4899">${notesCnt}</span></div>
+  </div>`;
+
+  const ranking=`<div class="stat-block">
+    <div class="stat-block-title">◆ 核心技能排行</div>
+    ${sorted.map((c,i)=>`
+      <div style="margin-bottom:10px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+          <span style="font-size:11px">${c.icon} ${c.name}</span>
+          <span style="color:${c.color};font-family:'Cinzel',serif;font-size:12px">Lv${c.lv} · ${c.xp} EXP</span>
+        </div>
+        <div class="rank-bar-wrap">
+          <div style="height:4px;width:${Math.round(c.xp/maxXP*100)}%;background:linear-gradient(90deg,${c.color}66,${c.color});border-radius:2px;box-shadow:0 0 6px ${c.color}"></div>
+        </div>
+      </div>`).join("")}
+  </div>`;
+
+  return overview+ranking;
+}
+
+// ── Profile ───────────────────────────────────────────────────────────────────
+function renderProfile(){
+  return `
+    <div class="stat-block">
+      <div class="stat-block-title">◆ 角色設定</div>
+      <div style="margin-bottom:12px">
+        <label class="form-label">角色名稱</label>
+        <div style="display:flex;gap:8px">
+          <input class="form-input" style="margin-bottom:0;flex:1" id="name-input" value="${state.charName}" placeholder="輸入名稱"/>
+          <button onclick="saveName()" style="background:#4a9eff22;border:1px solid #4a9eff66;color:#4a9eff;border-radius:8px;padding:10px 14px;cursor:pointer;font-size:12px">儲存</button>
+        </div>
+      </div>
+    </div>
+    <div class="stat-block">
+      <div class="stat-block-title">◆ 升級門檻參考</div>
+      <div style="max-height:200px;overflow-y:auto">
+      ${[1,5,10,15,20,25,30,40,50,60,70,80,90,98].map(i=>`
+        <div class="stat-row">
+          <span class="stat-lbl">Lv${i} → Lv${i+1}</span>
+          <span class="stat-val" style="color:var(--muted)">${LEVEL_XP[i+1].toLocaleString()} EXP</span>
+        </div>`).join("")}
+      </div>
+    </div>
+    <div class="stat-block">
+      <div class="stat-block-title">◆ 資料管理</div>
+      <button onclick="exportData()" style="width:100%;background:var(--bg);border:1px solid var(--border2);color:var(--text);border-radius:8px;padding:11px;cursor:pointer;font-size:12px;margin-bottom:8px">📤 匯出資料 (JSON)</button>
+      <input type="file" accept=".json" id="import-input" onchange="importData(event)" style="display:none;position:absolute;"/>
+      <button onclick="document.getElementById('import-input').click()" style="width:100%;background:var(--bg);border:1px solid var(--border2);color:var(--text);border-radius:8px;padding:11px;cursor:pointer;font-size:12px;margin-bottom:8px">📥 匯入資料 (JSON)</button>
+    </div>
+    <div style="text-align:center;color:var(--muted2);font-size:9px;margin-top:16px;letter-spacing:1px">資料儲存於本機 · 離線可用</div>
+  `;
+}
+
+function saveName(){
+  const v=document.getElementById("name-input")?.value?.trim();
+  if(v){state.charName=v;saveState();updateNav();}
+}
+
+function exportData(){
+  const blob=new Blob([JSON.stringify(state,null,2)],{type:"application/json"});
+  const a=document.createElement("a");a.href=URL.createObjectURL(blob);
+  a.download="skill-tree-backup.json";a.click();
+}
+function importData(e){
+  const file=e.target.files[0];if(!file)return;
+  const reader=new FileReader();
+  reader.onload=ev=>{
+    try{
+      const d=JSON.parse(ev.target.result);
+      // Validate required fields
+      if(!d||typeof d!=="object")throw new Error("非物件格式");
+      if(!d.charName||typeof d.charName!=="string")throw new Error("缺少 charName");
+      if(!Array.isArray(d.subSkills))throw new Error("缺少 subSkills 陣列");
+      // Validate each subSkill has minimal required fields
+      for(const s of d.subSkills){
+        if(typeof s.id==="undefined"||!s.coreId||!s.name)throw new Error("子技能資料格式不正確");
+      }
+      // Migration: ensure quests array exists
+      if(!d.quests)d.quests=[];
+      // Migration: ensure all daily quests have streakHistory
+      d.quests.forEach(q=>{
+        if(q.type==="daily"&&!q.streakHistory)q.streakHistory=[];
+      });
+      // Migration: ensure all subSkills have notes array
+      d.subSkills.forEach(s=>{if(!s.notes)s.notes=[];});
+      state=d;
+      saveState(true);render();showToast("✓ 匯入成功");
+    }catch(err){
+      alert(`匯入失敗：${err.message||"檔案格式不正確"}`);
+    }
+  };
+  reader.readAsText(file);
+  // Reset input so same file can be re-imported
+  e.target.value="";
+}
+
+// ── Add/Edit Sub Modal ────────────────────────────────────────────────────────
+let modalData=null;
+
+function openAddSub(coreId){
+  modalData={mode:"add",coreId,data:{id:null,coreId,name:"",icon:"⭐",type:"active",xp:0,desc:"",source:"",notes:[]}};
+  renderModal();
+}
+function editSub(id){
+  const s=state.subSkills.find(x=>x.id===id);
+  if(!s)return;
+  modalData={mode:"edit",data:{...s,notes:s.notes?s.notes.map(n=>({...n})):[]}};
+  renderModal();
+}
+// ── Merge Sub Skills ──────────────────────────────────────────────────────────
+function openMergeSub(coreId){
+  const subs=state.subSkills.filter(s=>s.coreId===coreId);
+  const overlay=document.createElement("div");
+  overlay.className="modal-overlay";overlay.id="merge-overlay";
+  overlay.innerHTML=`
+    <div class="modal-box" style="max-height:90vh;overflow-y:auto">
+      <div class="modal-title" style="color:#a855f7">⚗ 合併技能</div>
+
+      <label class="form-label">選擇要合併的技能（至少 2 個）</label>
+      <div id="merge-sub-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px">
+        ${subs.map(s=>`
+          <label style="display:flex;align-items:center;gap:8px;padding:8px 10px;
+            background:var(--bg);border:1px solid var(--border2);border-radius:8px;cursor:pointer">
+            <input type="checkbox" value="${s.id}" style="accent-color:#a855f7;width:16px;height:16px"/>
+            <span style="font-size:13px">${s.icon||"⭐"} ${s.name}</span>
+            <span style="margin-left:auto;font-size:10px;color:#a855f7;font-family:'Cinzel',serif">EXP ${s.xp||0}</span>
+          </label>`).join("")}
+      </div>
+
+      <label class="form-label">新技能名稱</label>
+      <input class="form-input" id="merge-name" placeholder="例：意念流暢度"/>
+
+      <label class="form-label">圖示 Emoji</label>
+      <input class="form-input" id="merge-icon" value="🔀" placeholder="🔀"/>
+
+      <label class="form-label">描述</label>
+      <input class="form-input" id="merge-desc" placeholder="簡短說明這個複合技能…"/>
+
+      <label class="form-label">類型</label>
+      <div style="display:flex;gap:8px;margin-bottom:14px">
+        <button id="mbtn-active" onclick="setMergeType('active')"
+          style="flex:1;padding:8px;border-radius:8px;cursor:pointer;font-size:11px;
+          background:#f59e0b22;border:1px solid #f59e0b;color:#f59e0b">⚡ 主動</button>
+        <button id="mbtn-passive" onclick="setMergeType('passive')"
+          style="flex:1;padding:8px;border-radius:8px;cursor:pointer;font-size:11px;
+          background:var(--bg);border:1px solid var(--border2);color:var(--muted)">🛡️ 被動</button>
+      </div>
+
+      <label class="form-label">隸屬核心技能</label>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px" id="merge-core-btns">
+        ${CORES.map(c=>`
+          <button onclick="setMergeCore('${c.id}')" id="mcore-${c.id}"
+            style="padding:6px 10px;border-radius:8px;cursor:pointer;font-size:11px;
+            background:${c.id===coreId?c.color+'22':'var(--bg)'};
+            border:1px solid ${c.id===coreId?c.color:'var(--border2)'};
+            color:${c.id===coreId?c.color:'var(--muted)'}">
+            ${c.icon} ${c.name}
+          </button>`).join("")}
+      </div>
+
+      <div id="merge-preview" style="display:none;padding:10px;background:#a855f711;
+        border:1px solid #a855f733;border-radius:8px;margin-bottom:14px;font-size:11px;color:#a855f7"></div>
+
+      <div class="modal-actions">
+        <button onclick="confirmMerge('${coreId}')"
+          style="flex:1;padding:12px;background:#a855f722;border:1px solid #a855f777;
+          color:#a855f7;border-radius:10px;cursor:pointer;font-size:13px;
+          font-family:'Share Tech Mono',monospace">⚗ 確認合併</button>
+        <button onclick="closeMergeModal()"
+          style="flex:1;padding:12px;background:var(--bg);border:1px solid var(--border2);
+          color:var(--muted);border-radius:10px;cursor:pointer;font-size:13px">取消</button>
+      </div>
+    </div>`;
+
+  // Live preview on checkbox change
+  overlay.querySelectorAll('input[type=checkbox]').forEach(cb=>{
+    cb.addEventListener('change',updateMergePreview);
+  });
+
+  document.body.appendChild(overlay);
+  // Set default state
+  window._mergeType="active";
+  window._mergeCoreId=coreId;
+}
+
+function setMergeType(t){
+  window._mergeType=t;
+  const ac=t==="active";
+  document.getElementById("mbtn-active").style.cssText=ac
+    ?"flex:1;padding:8px;border-radius:8px;cursor:pointer;font-size:11px;background:#f59e0b22;border:1px solid #f59e0b;color:#f59e0b"
+    :"flex:1;padding:8px;border-radius:8px;cursor:pointer;font-size:11px;background:var(--bg);border:1px solid var(--border2);color:var(--muted)";
+  document.getElementById("mbtn-passive").style.cssText=!ac
+    ?"flex:1;padding:8px;border-radius:8px;cursor:pointer;font-size:11px;background:#22d3ee22;border:1px solid #22d3ee;color:#22d3ee"
+    :"flex:1;padding:8px;border-radius:8px;cursor:pointer;font-size:11px;background:var(--bg);border:1px solid var(--border2);color:var(--muted)";
+}
+
+function setMergeCore(coreId){
+  window._mergeCoreId=coreId;
+  CORES.forEach(c=>{
+    const btn=document.getElementById(`mcore-${c.id}`);
+    if(!btn)return;
+    if(c.id===coreId){
+      btn.style.background=c.color+"22";
+      btn.style.borderColor=c.color;
+      btn.style.color=c.color;
+    }else{
+      btn.style.background="var(--bg)";
+      btn.style.borderColor="var(--border2)";
+      btn.style.color="var(--muted)";
+    }
+  });
+}
+
+function updateMergePreview(){
+  const checked=[...document.querySelectorAll('#merge-sub-list input:checked')];
+  const preview=document.getElementById("merge-preview");
+  if(!preview)return;
+  if(checked.length<2){preview.style.display="none";return;}
+  const total=checked.reduce((sum,cb)=>{
+    const s=state.subSkills.find(x=>x.id==cb.value);
+    return sum+(s?s.xp||0:0);
+  },0);
+  const names=checked.map(cb=>{
+    const s=state.subSkills.find(x=>x.id==cb.value);
+    return s?`${s.icon||"⭐"}${s.name}`:"";
+  }).filter(Boolean).join(" + ");
+  preview.style.display="block";
+  preview.textContent=`${names} → 合併後 EXP：${total}`;
+}
+
+function closeMergeModal(){
+  document.getElementById("merge-overlay")?.remove();
+  window._mergeType=null;window._mergeCoreId=null;
+}
+
+function confirmMerge(fromCoreId){
+  const checked=[...document.querySelectorAll('#merge-sub-list input:checked')];
+  if(checked.length<2){showToast("請至少選擇 2 個技能");return;}
+  const name=document.getElementById("merge-name")?.value?.trim();
+  if(!name){showToast("請輸入新技能名稱");return;}
+  const icon=document.getElementById("merge-icon")?.value||"🔀";
+  const desc=document.getElementById("merge-desc")?.value||"";
+  const targetCoreId=window._mergeCoreId||fromCoreId;
+  const type=window._mergeType||"active";
+
+  // Gather source skills
+  const sources=checked.map(cb=>state.subSkills.find(x=>x.id==cb.value)).filter(Boolean);
+  const totalXP=sources.reduce((sum,s)=>sum+(s.xp||0),0);
+  const today=new Date().toLocaleDateString("zh-TW");
+
+  // Build detailed merge record listing each skill's name, XP, and source book
+  const sourceLines=sources.map(s=>{
+    const bookPart=s.source?` 📚${s.source}`:"";
+    return `・${s.icon||"⭐"}${s.name}（EXP ${s.xp||0}${bookPart}）`;
+  }).join("　");
+  const mergeRecord={
+    id:Date.now()-1,
+    text:`⚗ 合併自：${sourceLines}　合計 EXP ${totalXP}`,
+    date:today
+  };
+
+  // Collect all notes from source skills (preserve original skill attribution via date prefix)
+  const mergedNotes=[mergeRecord,...sources.flatMap(s=>s.notes||[])];
+
+  // Merge all unique source books
+  const allSources=sources.map(s=>s.source||"").filter(Boolean);
+  const uniqueSources=[...new Set(allSources)].join(" + ");
+
+  // Create new merged skill
+  const newSkill={
+    id:Date.now(),
+    name,icon,desc,
+    type,
+    coreId:targetCoreId,
+    xp:totalXP,
+    source:uniqueSources,
+    notes:mergedNotes
+  };
+
+  // Remove source skills, add new one
+  const sourceIds=new Set(sources.map(s=>s.id));
+  state.subSkills=state.subSkills.filter(s=>!sourceIds.has(s.id));
+  state.subSkills.push(newSkill);
+
+  saveState(true);
+  closeMergeModal();
+  // Navigate to the target core's detail page
+  detailCore=targetCoreId;
+  render();
+  showToast(`⚗ 合併完成！${name} EXP ${totalXP}`,2500);
+}
+
+function closeModal(){
+  const m=document.getElementById("modal");if(m)m.remove();modalData=null;
+}
+
+function renderModal(){
+  const existing=document.getElementById("modal");if(existing)existing.remove();
+  const d=modalData.data;
+  const c=CORE_MAP[d.coreId];
+  const notesHTML=(d.notes||[]).map(n=>`
+    <div class="note-item" id="note-${n.id}">
+      <div class="note-text">${n.text}<span class="note-date">${n.date}</span></div>
+      <button class="note-del" onclick="delNote(${n.id})">✕</button>
+    </div>`).join("");
+
+  const overlay=document.createElement("div");
+  overlay.id="modal";overlay.className="modal-overlay";
+  overlay.onclick=e=>{if(e.target===overlay)closeModal();};
+  overlay.innerHTML=`
+    <div class="modal-sheet" id="modal-sheet">
+      <div class="modal-handle"></div>
+      <div class="modal-title" style="color:${c.color}">◆ ${modalData.mode==="add"?"新增子技能":"編輯子技能"} ◆</div>
+
+      <label class="form-label">歸屬核心技能</label>
+      <select class="form-select" id="m-core" onchange="modalUpdateCore(this.value)">
+        ${CORES.map(cc=>`<option value="${cc.id}" ${cc.id===d.coreId?"selected":""}>${cc.icon} ${cc.title||cc.name}</option>`).join("")}
+      </select>
+
+      <label class="form-label">技能類型</label>
+      <div class="type-toggle">
+        <button class="type-btn" id="btn-active" style="${d.type==="active"?`background:#f59e0b22;border-color:#f59e0b;color:#f59e0b`:""}" onclick="setType('active')">⚡ 主動技能</button>
+        <button class="type-btn" id="btn-passive" style="${d.type==="passive"?`background:#22d3ee22;border-color:#22d3ee;color:#22d3ee`:""}" onclick="setType('passive')">🛡️ 被動技能</button>
+      </div>
+
+      <label class="form-label">子技能名稱 *</label>
+      <input class="form-input" id="m-name" value="${d.name}" placeholder="例：公開演講"/>
+
+      <label class="form-label">描述</label>
+      <input class="form-input" id="m-desc" value="${d.desc||""}" placeholder="簡短說明"/>
+
+      <label class="form-label">圖示 Emoji</label>
+      <input class="form-input" id="m-icon" value="${d.icon||"⭐"}" placeholder="⭐"/>
+
+      <label class="form-label">📚 來源（書籍 / 課程）</label>
+      <input class="form-input" id="m-source" value="${d.source||""}" placeholder="《原子習慣》/ Coursera..."/>
+
+      <label class="form-label">EXP 值</label>
+      <div class="xp-input-row">
+        <input class="xp-num" type="number" id="m-xp" value="${d.xp}" min="0"/>
+        <div class="xp-quick">
+          <button class="xp-qbtn" onclick="addXP(10)">+10</button>
+          <button class="xp-qbtn" onclick="addXP(25)">+25</button>
+          <button class="xp-qbtn" onclick="addXP(50)">+50</button>
+          <button class="xp-qbtn" onclick="addXP(100)">+100</button>
+        </div>
+      </div>
+
+      <label class="form-label" style="margin-top:12px">📝 知識筆記</label>
+      <div class="notes-list" id="notes-list">${notesHTML}</div>
+      <div class="note-add-row">
+        <input class="note-add-input" id="note-input" placeholder="記錄學到的知識要點…"
+          onkeydown="if(event.key==='Enter')addNote()"/>
+        <button class="note-add-btn" onclick="addNote()">+</button>
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn-save" id="btn-save"
+          style="background:${c.color}22;border:1px solid ${c.color}77;color:${c.color}"
+          onclick="saveSub()">
+          ${modalData.mode==="add"?"✦ 習得技能":"儲存"}
+        </button>
+        ${modalData.mode==="edit"?`<button class="btn-del" onclick="deleteSub(${d.id})">刪除</button>`:""}
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+function modalUpdateCore(coreId){
+  if(modalData)modalData.data.coreId=coreId;
+}
+function setType(t){
+  if(!modalData)return;
+  modalData.data.type=t;
+  const ac=t==="active";
+  document.getElementById("btn-active").style.cssText=ac?"background:#f59e0b22;border-color:#f59e0b;color:#f59e0b":"";
+  document.getElementById("btn-passive").style.cssText=!ac?"background:#22d3ee22;border-color:#22d3ee;color:#22d3ee":"";
+}
+function addXP(v){
+  const el=document.getElementById("m-xp");
+  if(el)el.value=Math.max(0,(parseInt(el.value)||0)+v);
+}
+function addNote(){
+  const el=document.getElementById("note-input");
+  const txt=el?.value?.trim();if(!txt||!modalData)return;
+  const note={id:Date.now(),text:txt,date:new Date().toLocaleDateString("zh-TW")};
+  modalData.data.notes.push(note);
+  const list=document.getElementById("notes-list");
+  const div=document.createElement("div");div.className="note-item";div.id=`note-${note.id}`;
+  div.innerHTML=`<div class="note-text">${note.text}<span class="note-date">${note.date}</span></div>
+    <button class="note-del" onclick="delNote(${note.id})">✕</button>`;
+  list.appendChild(div);el.value="";
+}
+function delNote(id){
+  if(!modalData)return;
+  modalData.data.notes=modalData.data.notes.filter(n=>n.id!==id);
+  document.getElementById(`note-${id}`)?.remove();
+}
+function saveSub(){
+  if(!modalData)return;
+  const d=modalData.data;
+  d.name=document.getElementById("m-name")?.value?.trim()||"";
+  if(!d.name)return;
+  d.desc=document.getElementById("m-desc")?.value||"";
+  d.icon=document.getElementById("m-icon")?.value||"⭐";
+  d.source=document.getElementById("m-source")?.value||"";
+  const prevLv=d.id?calcLv(getCoreXP(d.coreId)):0;
+  d.xp=Math.max(0,parseInt(document.getElementById("m-xp")?.value)||0);
+  d.coreId=document.getElementById("m-core")?.value||d.coreId;
+  if(d.id){
+    state.subSkills=state.subSkills.map(s=>s.id===d.id?{...d}:s);
+  }else{
+    state.subSkills.push({...d,id:Date.now()});
+  }
+  const newLv=calcLv(getCoreXP(d.coreId));
+  saveState();closeModal();render();
+  if(newLv>prevLv){
+    const c=CORE_MAP[d.coreId];
+    setTimeout(()=>showToast(`🎊 升級！${c.icon}${c.title} → Lv${newLv}！`,3000),400);
+  }
+}
+function deleteCore(coreId){
+  const c=state.cores?state.cores.find(x=>x.id===coreId):CORES.find(x=>x.id===coreId);
+  const subCount=state.subSkills.filter(s=>s.coreId===coreId).length;
+  const msg=subCount>0
+    ?`確定刪除「${c?c.title:coreId}」？
+此核心技能下有 ${subCount} 個子技能也會一併刪除。`
+    :`確定刪除「${c?c.title:coreId}」？`;
+  if(!confirm(msg))return;
+  // Remove from state.cores
+  if(!state.cores)state.cores=[...CORES];
+  state.cores=state.cores.filter(x=>x.id!==coreId);
+  // Remove sub skills
+  state.subSkills=state.subSkills.filter(s=>s.coreId!==coreId);
+  // Rebuild CORES array from state
+  syncCores();
+  saveState();detailCore=null;render();
+  showToast("已刪除核心技能");
+}
+
+function openAddCore(){
+  const existing=document.getElementById("modal");if(existing)existing.remove();
+  const overlay=document.createElement("div");
+  overlay.id="modal";overlay.className="modal-overlay";
+  overlay.onclick=e=>{if(e.target===overlay)closeModal();};
+  const COLORS=["#ef4444","#22d3ee","#a855f7","#6366f1","#f59e0b","#ec4899","#10b981","#84cc16","#f97316","#3b82f6","#e879f9","#facc15"];
+  let pickedColor=COLORS[0];
+  overlay.innerHTML=`
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <div class="modal-title" style="color:#4a9eff">◆ 新增核心技能 ◆</div>
+      <label class="form-label">自訂名稱（例：預知眼）*</label>
+      <input class="form-input" id="nc-title" placeholder="你的核心技能名稱"/>
+      <label class="form-label">類別備注（例：時間管理）</label>
+      <input class="form-input" id="nc-name" placeholder="選填，作為副標題說明"/>
+      <label class="form-label">圖示 Emoji</label>
+      <input class="form-input" id="nc-icon" placeholder="⭐" value="⭐"/>
+      <label class="form-label">顏色</label>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px" id="color-picker">
+        ${COLORS.map((col,i)=>`<div onclick="pickColor('${col}')" id="cpick-${i}"
+          style="width:28px;height:28px;border-radius:50%;background:${col};cursor:pointer;
+          border:2px solid ${i===0?'white':col+'44'};transition:all .2s"></div>`).join("")}
+      </div>
+      <div class="modal-actions">
+        <button class="btn-save" style="background:#4a9eff22;border:1px solid #4a9eff77;color:#4a9eff"
+          onclick="saveNewCore()">✦ 新增</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+let _pickedColor="#ef4444";
+function pickColor(col){
+  _pickedColor=col;
+  document.querySelectorAll("#color-picker div").forEach(d=>{
+    const c=d.style.background;
+    d.style.border=c===col||d.style.background===col?"2px solid white":"2px solid "+col+"44";
+  });
+  // highlight selected
+  document.querySelectorAll("#color-picker div").forEach(d=>{
+    const match=d.getAttribute("onclick")===`pickColor('${col}')`;
+    d.style.border=match?"2px solid white":"2px solid "+d.style.background+"44";
+    d.style.transform=match?"scale(1.2)":"scale(1)";
+  });
+}
+
+function saveNewCore(){
+  const title=document.getElementById("nc-title")?.value?.trim();
+  if(!title){alert("請輸入名稱");return;}
+  const name=document.getElementById("nc-name")?.value?.trim()||"";
+  const icon=document.getElementById("nc-icon")?.value?.trim()||"⭐";
+  const color=_pickedColor||"#4a9eff";
+  const id="core_"+Date.now();
+  const newCore={id,title,name,icon,color};
+  if(!state.cores)state.cores=[...CORES];
+  state.cores.push(newCore);
+  syncCores();
+  saveState();closeModal();render();
+  showToast("✦ 新增核心技能："+title);
+}
+
+function syncCores(){
+  // Sync the runtime CORES array from state.cores (snapshot first for safety)
+  if(state.cores&&state.cores.length>0){
+    const snapshot=[...state.cores];
+    CORES.length=0;
+    snapshot.forEach(c=>CORES.push(c));
+    // Rebuild CORE_MAP atomically
+    Object.keys(CORE_MAP).forEach(k=>delete CORE_MAP[k]);
+    CORES.forEach(c=>CORE_MAP[c.id]=c);
+  }
+}
+
+function quickAddXP(id){
+  const s=state.subSkills.find(x=>x.id===id);
+  if(!s)return;
+  const coreId=s.coreId;
+  const prevLv=calcLv(getCoreXP(coreId));
+  s.xp=(s.xp||0)+10;
+  const newLv=calcLv(getCoreXP(coreId));
+  saveState(true);
+  // preserve scroll position
+  const scrollTop=document.getElementById("content").scrollTop;
+  render();
+  document.getElementById("content").scrollTop=scrollTop;
+  showToast(`⚡ ${s.name} +10 EXP`);
+  if(newLv>prevLv){
+    const c=CORE_MAP[coreId];
+    setTimeout(()=>showToast(`🎊 升級！${c.icon}${c.title} → Lv${newLv}！`,3000),600);
+  }
+}
+function deleteSub(id){
+  if(!confirm("確定刪除此子技能？"))return;
+  state.subSkills=state.subSkills.filter(s=>s.id!==id);
+  saveState();closeModal();render();
+}
+
+// ── PWA Init ──────────────────────────────────────────────────────────────────
+if("serviceWorker" in navigator){
+  window.addEventListener("load",()=>{
+    navigator.serviceWorker.register("./sw.js").catch(()=>{});
+  });
+}
+
+
+// ── Quest System ──────────────────────────────────────────────────────────────
+const QUEST_TYPES = {
+  main:  {label:"主線任務", icon:"⚔️", color:"#f59e0b", bg:"#f59e0b"},
+  side:  {label:"支線任務", icon:"🗺️", color:"#22d3ee", bg:"#22d3ee"},
+  daily: {label:"每日任務", icon:"🌟", color:"#10b981", bg:"#10b981"},
+};
+
+let questFilter = "all"; // all | main | side | daily | done
+
+function renderQuests(){
+  if(!state.quests)state.quests=[];
+  const now = new Date(); now.setHours(0,0,0,0);
+
+  // For daily: never truly "done", show all dailies under daily tab
+  const isActive = q => q.type==="daily" ? true : !q.done;
+  const filtered = state.quests.filter(q=>{
+    if(questFilter==="done")  return q.done && q.type!=="daily";
+    if(questFilter==="daily") return q.type==="daily";
+    if(questFilter==="all")   return isActive(q);
+    return isActive(q) && q.type===questFilter;
+  });
+
+  const counts={
+    all:   state.quests.filter(q=>isActive(q)).length,
+    main:  state.quests.filter(q=>!q.done&&q.type==="main").length,
+    side:  state.quests.filter(q=>!q.done&&q.type==="side").length,
+    daily: state.quests.filter(q=>q.type==="daily").length,
+    done:  state.quests.filter(q=>q.done&&q.type!=="daily").length,
+  };
+
+  const tabs=[
+    {k:"all",  label:`全部 (${counts.all})`},
+    {k:"main", label:`⚔️ 主線 (${counts.main})`},
+    {k:"side", label:`🗺️ 支線 (${counts.side})`},
+    {k:"daily",label:`🌟 每日 (${counts.daily})`},
+    {k:"done", label:`✓ 完成 (${counts.done})`},
+  ].map(t=>`<button class="qtab ${questFilter===t.k?"active":""}"
+    style="${questFilter===t.k?`background:${t.k==="done"?"#22d3ee":"#4a9eff"}22;border-color:${t.k==="done"?"#22d3ee":"#4a9eff"};color:${t.k==="done"?"#22d3ee":"#4a9eff"}`:""}"
+    onclick="questFilter='${t.k}';render()">${t.label}</button>`).join("");
+
+  let cards="";
+  if(filtered.length===0){
+    cards=`<div class="empty-state" style="margin-top:20px">
+      ${questFilter==="done"?"尚無完成的任務":"沒有進行中的任務<br><small>點右下角 + 新增任務</small>"}
+    </div>`;
+  } else if(questFilter==="daily"||questFilter==="all"){
+    // Split daily into undone / done-today
+    const dailyUndone=filtered.filter(q=>q.type==="daily"&&!isDailyDoneToday(q));
+    const dailyDone=filtered.filter(q=>q.type==="daily"&&isDailyDoneToday(q));
+    const others=filtered.filter(q=>q.type!=="daily");
+    const otherCards=others.map(q=>renderQuestCard(q,now)).join("");
+    const undoneCards=dailyUndone.map(q=>renderQuestCard(q,now)).join("");
+    const doneCards=dailyDone.length>0
+      ?`<div style="color:var(--muted);font-size:9px;letter-spacing:2px;margin:14px 0 8px;padding-left:2px">
+          ✓ 今日已完成 (${dailyDone.length})
+        </div>${dailyDone.map(q=>renderQuestCard(q,now)).join("")}`
+      :"";
+    cards=otherCards+undoneCards+doneCards;
+  } else {
+    cards=filtered.map(q=>renderQuestCard(q,now)).join("");
+  }
+
+  const doneCnt=state.quests.filter(q=>q.done&&q.type!=="daily").length;
+  const clearBtn=questFilter==="done"&&doneCnt>0
+    ?`<button onclick="clearDoneQuests()"
+        style="width:100%;background:#1a0808;border:1px solid #ef444455;color:#ef4444;
+        border-radius:8px;padding:9px;cursor:pointer;font-size:11px;margin-bottom:10px;font-family:'Share Tech Mono',monospace">
+        🗑 清除所有已完成任務 (${doneCnt})
+      </button>`
+    :"";
+
+  return `
+    <div style="padding-bottom:70px">
+      <div class="quest-tabs">${tabs}</div>
+      ${clearBtn}
+      ${cards}
+    </div>
+    <button class="quest-add-fab" onclick="openAddQuest()">＋</button>`;
+}
+
+function renderQuestCard(q, now){
+  const qt = QUEST_TYPES[q.type]||QUEST_TYPES.side;
+  let dueHtml="", isOverdue=false, isSoon=false;
+  if(q.dueDate&&!q.done){
+    const due=new Date(q.dueDate); due.setHours(0,0,0,0);
+    const diff=Math.round((due-now)/(1000*60*60*24));
+    isOverdue=diff<0;
+    isSoon=diff>=0&&diff<=3;
+    const dueLabel=isOverdue?`逾期 ${Math.abs(diff)} 天`
+      :diff===0?"今天截止"
+      :diff===1?"明天截止"
+      :`${diff} 天後截止`;
+    dueHtml=`<span class="quest-due ${isOverdue?"overdue":isSoon?"soon":"ok"}">📅 ${dueLabel}</span>`;
+  }
+  // Build reward display from multi-rewards array
+  const rewards=q.rewards&&q.rewards.length>0?q.rewards
+    :(q.rewardSkillId?[{skillId:q.rewardSkillId,xp:q.rewardXP||50}]:[]);
+  const rewardHtml=rewards.length>0
+    ?rewards.map(r=>{
+        const s=state.subSkills.find(x=>x.id===r.skillId);
+        return s?`<span class="quest-reward">⚡ +${r.xp} EXP → ${s.icon||""} ${s.name}</span>`:"";
+      }).join("")
+    :`<span class="quest-reward" style="color:var(--muted2)">無獎勵</span>`;
+
+  const isDailyDone=q.type==="daily"&&isDailyDoneToday(q);
+  const cardDone=q.done||isDailyDone;
+  const completeBtnDisabled=isDailyDone;
+  let dailyMeta="";
+  if(q.type==="daily"){
+    const streak=calcStreak(q);
+    const streakStr=streak>=2?`🔥 ${streak} 天連續`:streak===1?"🔥 連續 1 天":"";
+    const countStr=q.completedCount?`累計 ${q.completedCount} 次`:"";
+    dailyMeta=`<span style="font-size:9px;color:var(--muted2);margin-left:6px">${[streakStr,countStr].filter(Boolean).join(" · ")}</span>`;
+  }
+
+  return `<div class="quest-card ${cardDone?"done":""} ${isOverdue?"overdue":""}" onclick="openEditQuest(${q.id})">
+    <div style="position:absolute;top:0;left:0;width:3px;height:100%;background:${qt.color};border-radius:12px 0 0 12px"></div>
+    <div style="padding-left:6px">
+      <div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px">
+        <span class="quest-badge" style="color:${qt.color};background:${qt.color}18;border:1px solid ${qt.color}44">
+          ${qt.icon} ${qt.label}
+        </span>
+        ${isDailyDone?'<span class="daily-done-badge">✓ 今日已完成</span>':""}
+        ${q.done&&q.type!=="daily"?'<span style="font-size:9px;color:#10b981;margin-left:2px">✓ 已完成</span>':""}
+        ${dailyMeta}
+      </div>
+      <div class="quest-title ${cardDone?"done-strike":""}">${q.title}</div>
+      ${q.desc?`<div class="quest-desc">${q.desc}</div>`:""}
+      <div class="quest-meta">
+        <div style="display:flex;flex-direction:column;gap:3px">
+          ${rewardHtml}
+          ${dueHtml}
+        </div>
+        ${!q.done?`<button class="quest-complete-btn"
+          style="background:${completeBtnDisabled?"#1e3a4a":qt.color+"22"};
+          border:1px solid ${completeBtnDisabled?"#2a4a6a":qt.color+"66"};
+          color:${completeBtnDisabled?"var(--muted)":qt.color};
+          opacity:${completeBtnDisabled?0.5:1}"
+          onclick="event.stopPropagation();completeQuest(${q.id})">
+          ${isDailyDone?"明日再來":"✓ 完成"}</button>`:""}
+      </div>
+    </div>
+  </div>`;
+}
+
+function todayStr(){
+  const d=new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
+function isDailyDoneToday(q){
+  if(q.type!=="daily"||!q.lastCompletedDate)return false;
+  return q.lastCompletedDate===todayStr();
+}
+function completeQuest(id){
+  const q=state.quests.find(x=>x.id===id);
+  if(!q)return;
+  if(q.type==="daily"&&isDailyDoneToday(q)){
+    showToast("今日已完成，明天再來！");return;
+  }
+  // Capture pre-completion levels for level-up detection
+  const prevLevels={};
+  CORES.forEach(c=>{prevLevels[c.id]=calcLv(getCoreXP(c.id));});
+
+  // Mark done
+  if(q.type==="daily"){
+    const td=todayStr();
+    q.lastCompletedDate=td;
+    q.completedCount=(q.completedCount||0)+1;
+    // Record streak history (keep last 400 days max)
+    if(!q.streakHistory)q.streakHistory=[];
+    if(!q.streakHistory.includes(td))q.streakHistory.push(td);
+    if(q.streakHistory.length>400)q.streakHistory=q.streakHistory.slice(-400);
+  } else {
+    q.done=true;
+    q.completedAt=new Date().toISOString();
+  }
+  // Multi-skill EXP rewards
+  const rewards=q.rewards&&q.rewards.length>0?q.rewards
+    :(q.rewardSkillId?[{skillId:q.rewardSkillId,xp:q.rewardXP||50}]:[]);
+  let msgs=[];
+  let levelUps=[];
+  rewards.forEach(r=>{
+    if(!r.skillId)return;
+    const s=state.subSkills.find(x=>x.id===r.skillId);
+    if(s){s.xp=(s.xp||0)+(r.xp||0);msgs.push(`${s.name}+${r.xp}`);}
+  });
+  // E: detect core level-ups after XP applied
+  CORES.forEach(c=>{
+    const newLv=calcLv(getCoreXP(c.id));
+    if(newLv>prevLevels[c.id])levelUps.push(`${c.icon}${c.title} → Lv${newLv}！`);
+  });
+  if(levelUps.length>0){
+    setTimeout(()=>showToast(`🎊 升級！${levelUps.join(" ")}`,3500),800);
+  }
+  if(msgs.length>0)showToast(`🎉 ${q.title} 完成！${msgs.join(" · ")}`);
+  else showToast(`🎉 任務完成：${q.title}`);
+  saveState(true);render();
+}
+
+function openAddQuest(){
+  _editingQuest=null;
+  showQuestModal(null);
+}
+function openEditQuest(id){
+  _editingQuest=state.quests.find(q=>q.id===id)||null;
+  showQuestModal(_editingQuest);
+}
+
+let _editingQuest=null;
+
+function showQuestModal(q){
+  const existing=document.getElementById("modal");if(existing)existing.remove();
+  const isNew=!q;
+  const type=q?.type||"main";
+  const qt=QUEST_TYPES[type];
+  // Init global rewards
+  _modalRewards = q?.rewards ? q.rewards.map(r=>({...r}))
+    : (q?.rewardSkillId ? [{skillId:q.rewardSkillId, xp:q.rewardXP||50}] : []);
+
+  const overlay=document.createElement("div");
+  overlay.id="modal";overlay.className="modal-overlay";
+  overlay.onclick=e=>{if(e.target===overlay)closeModal();};
+  overlay.innerHTML=`
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <div class="modal-title" style="color:#f59e0b">◆ ${isNew?"新增任務":"編輯任務"} ◆</div>
+
+      <label class="form-label">任務類型</label>
+      <div class="type-toggle" style="margin-bottom:14px">
+        ${Object.entries(QUEST_TYPES).map(([k,t])=>`
+          <button id="qtype-${k}" class="type-btn"
+            style="${(q?.type||"main")===k?`background:${t.color}22;border-color:${t.color};color:${t.color}`:""}"
+            onclick="selectQType('${k}')">${t.icon} ${t.label.replace("任務","")}</button>`).join("")}
+      </div>
+      <input type="hidden" id="q-type" value="${q?.type||"main"}"/>
+
+      <label class="form-label">任務名稱 *</label>
+      <input class="form-input" id="q-title" value="${q?.title||""}" placeholder="例：完成《原子習慣》第一章"/>
+
+      <label class="form-label">描述</label>
+      <textarea class="form-input" id="q-desc" rows="2"
+        style="resize:none;height:60px;line-height:1.5"
+        placeholder="任務目標或備注...">${q?.desc||""}</textarea>
+
+      <label class="form-label">截止日期</label>
+      <input class="form-input" type="date" id="q-due" value="${q?.dueDate||""}"/>
+
+      <label class="form-label">完成獎勵 → 子技能 EXP（可多選）</label>
+      <div id="reward-list" style="margin-bottom:8px"></div>
+      <div style="display:flex;gap:6px;margin-bottom:14px">
+        <select class="form-select" id="skill-pick-select" style="margin-bottom:0;flex:1">
+          <option value="">選擇子技能加入獎勵…</option>
+        </select>
+        <button onclick="addRewardSkillFromSelect()"
+          style="background:#f59e0b22;border:1px solid #f59e0b66;color:#f59e0b;
+          border-radius:8px;padding:8px 14px;cursor:pointer;font-size:13px;flex-shrink:0">+</button>
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn-save" style="background:#f59e0b22;border:1px solid #f59e0b77;color:#f59e0b"
+          onclick="saveQuest()">
+          ${isNew?"✦ 新增任務":"儲存"}
+        </button>
+        ${!isNew?`<button class="btn-del" onclick="deleteQuest(${q.id})">刪除</button>`:""}
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  // Init reward list and skill picker
+  renderRewardList();
+}
+
+function renderRewardList(){
+  const el=document.getElementById("reward-list");
+  if(!el)return;
+  if(_modalRewards.length===0){
+    el.innerHTML='<div style="font-size:10px;color:var(--muted2);padding:4px 0 8px">尚未加入任何獎勵</div>';
+  } else {
+    let rows="";
+    _modalRewards.forEach((r,i)=>{
+      const s=state.subSkills.find(x=>x.id===r.skillId);
+      if(!s)return;
+      const c=CORE_MAP[s.coreId];
+      const xpBtns=[10,25,50,100].map(v=>{
+        const active=(r.xp||50)===v;
+        return '<button onclick="event.stopPropagation();_modalRewards['+i+'].xp='+v+';renderRewardList()" '
+          +'style="background:'+(active?"#f59e0b33":"var(--bg2)")
+          +';border:1px solid '+(active?"#f59e0b":"var(--border)")
+          +';color:'+(active?"#f59e0b":"var(--muted)")
+          +';border-radius:5px;padding:3px 8px;cursor:pointer;font-size:10px">'+v+'</button>';
+      }).join("");
+      rows+='<div class="reward-skill-row">'
+        +'<span class="reward-skill-name">'+( s.icon||"")+" "+s.name
+        +'<span style="color:var(--muted2);font-size:9px"> ('+(c?c.title||c.name:"")+")</span></span>"
+        +'<div style="display:flex;gap:3px;flex-shrink:0">'+xpBtns+'</div>'
+        +'<button class="reward-del" onclick="_modalRewards.splice('+i+',1);renderRewardList();refreshSkillSelect()">✕</button>'
+        +'</div>';
+    });
+    el.innerHTML=rows;
+  }
+  refreshSkillSelect();
+}
+function refreshSkillSelect(){
+  const sel=document.getElementById("skill-pick-select");
+  if(!sel)return;
+  const existing=new Set(_modalRewards.map(r=>r.skillId));
+  const available=state.subSkills.filter(s=>!existing.has(s.id));
+  sel.innerHTML=`<option value="">選擇子技能加入獎勵…</option>`
+    +available.map(s=>{
+      const c=CORE_MAP[s.coreId];
+      return `<option value="${s.id}">${s.icon||""} ${s.name} (${c?c.title||c.name:""})</option>`;
+    }).join("");
+}
+
+function addRewardSkillFromSelect(){
+  const sel=document.getElementById("skill-pick-select");
+  if(!sel||!sel.value)return;
+  const skillId=parseInt(sel.value);
+  if(_modalRewards.find(r=>r.skillId===skillId))return;
+  _modalRewards.push({skillId,xp:50});
+  renderRewardList();
+}
+
+function selectQType(k){
+  document.getElementById("q-type").value=k;
+  Object.entries(QUEST_TYPES).forEach(([key,t])=>{
+    const btn=document.getElementById("qtype-"+key);
+    if(!btn)return;
+    if(key===k){
+      btn.style.background=t.color+"22";
+      btn.style.borderColor=t.color;
+      btn.style.color=t.color;
+    } else {
+      btn.style.background="";btn.style.borderColor="";btn.style.color="";
+    }
+  });
+}
+
+
+
+function saveQuest(){
+  const title=document.getElementById("q-title")?.value?.trim();
+  if(!title){alert("請輸入任務名稱");return;}
+  const type=document.getElementById("q-type")?.value||"main";
+  const desc=document.getElementById("q-desc")?.value?.trim()||"";
+  const dueDate=document.getElementById("q-due")?.value||"";
+  // Read final XP values from inputs
+  const rewardInputs=document.querySelectorAll(".reward-xp-input");
+  rewardInputs.forEach((el,i)=>{if(_modalRewards[i])_modalRewards[i].xp=Math.max(1,parseInt(el.value)||1);});
+  const rewards=[..._modalRewards];
+
+  if(!state.quests)state.quests=[];
+  if(_editingQuest){
+    const q=state.quests.find(x=>x.id===_editingQuest.id);
+    if(q){
+      q.title=title;q.type=type;q.desc=desc;q.dueDate=dueDate;q.rewards=rewards;
+      // legacy compat
+      q.rewardSkillId=rewards[0]?.skillId||null;q.rewardXP=rewards[0]?.xp||50;
+    }
+  } else {
+    state.quests.push({
+      id:Date.now(),title,type,desc,dueDate,rewards,
+      rewardSkillId:rewards[0]?.skillId||null,rewardXP:rewards[0]?.xp||50,
+      done:false,completedAt:null,completedCount:0,lastCompletedDate:null,
+      createdAt:new Date().toISOString(),
+    });
+  }
+  saveState();closeModal();render();
+}
+
+function clearDoneQuests(){
+  const cnt=state.quests.filter(q=>q.done&&q.type!=="daily").length;
+  if(!confirm(`確定清除所有 ${cnt} 個已完成任務？此操作無法復原。`))return;
+  state.quests=state.quests.filter(q=>!(q.done&&q.type!=="daily"));
+  saveState(true);render();showToast(`🗑 已清除 ${cnt} 個已完成任務`);
+}
+
+function deleteQuest(id){
+  if(!confirm("確定刪除此任務？"))return;
+  state.quests=state.quests.filter(q=>q.id!==id);
+  saveState();closeModal();render();
+}
+
+// ── Check overdue & daily reset on app open (iOS-safe: no background timer dependency) ──
+function checkOverdue(){
+  if(!state.quests)return;
+  const now=new Date();now.setHours(0,0,0,0);
+  const overdue=state.quests.filter(q=>{
+    if(q.done||q.type==="daily"||!q.dueDate)return false;
+    const due=new Date(q.dueDate);due.setHours(0,0,0,0);
+    return due<now;
+  });
+  if(overdue.length>0)showToast(`⚠️ 有 ${overdue.length} 個任務已逾期`,2500);
+
+  // D: Today summary - count pending daily quests
+  const pendingDaily=state.quests.filter(q=>q.type==="daily"&&!isDailyDoneToday(q)).length;
+  if(pendingDaily>0){
+    setTimeout(()=>showToast(`🌟 今日還有 ${pendingDaily} 個每日習慣待完成`,2500),overdue.length>0?3200:600);
+  }
+
+  // iOS-safe midnight re-render: only schedule if tab is visible, check again on visibilitychange
+  document.removeEventListener("visibilitychange",_onVisible);
+  document.addEventListener("visibilitychange",_onVisible);
+}
+function _onVisible(){
+  if(!document.hidden){render();checkOverdue();}
+}
+
+loadState();
+if(state.cores)syncCores();
+checkOverdue();
+render();
+</script>
+</body>
+</html>
+EOF
+echo "index done"
