@@ -1327,6 +1327,11 @@ function renderQuestCard(q, now){
         <div style="display:flex;flex-direction:column;gap:3px">
           ${rewardHtml}
           ${dueHtml}
+          ${q.dueDate&&!q.done&&!q.archived?`<button
+            onclick="event.stopPropagation();downloadICS(${q.id})"
+            style="align-self:flex-start;margin-top:3px;background:#a855f718;border:1px solid #a855f755;
+            color:#a855f7;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:9px;
+            font-family:'Share Tech Mono',monospace">📅 加入日曆</button>`:""}
         </div>
         ${q.done&&!q.archived?`<button class="quest-complete-btn"
           style="background:#f59e0b18;border:1px solid #f59e0b55;color:#f59e0b"
@@ -1445,8 +1450,13 @@ function showQuestModal(q){
         style="resize:none;height:60px;line-height:1.5"
         placeholder="任務目標或備注...">${q?.desc||""}</textarea>
 
-      <label class="form-label">截止日期</label>
-      <input class="form-input" type="date" id="q-due" value="${q?.dueDate||""}"/>
+      <label class="form-label">截止日期與時間</label>
+      <div style="display:flex;gap:8px;margin-bottom:14px">
+        <input class="form-input" type="date" id="q-due" value="${q?.dueDate||""}"
+          style="margin-bottom:0;flex:1.4"/>
+        <input class="form-input" type="time" id="q-due-time" value="${q?.dueTime||""}"
+          style="margin-bottom:0;flex:1" placeholder="選填時間"/>
+      </div>
 
       <label class="form-label">完成獎勵 → 子技能 EXP（可多選）</label>
       <div id="reward-list" style="margin-bottom:8px"></div>
@@ -1546,6 +1556,7 @@ function saveQuest(){
   const type=document.getElementById("q-type")?.value||"main";
   const desc=document.getElementById("q-desc")?.value?.trim()||"";
   const dueDate=document.getElementById("q-due")?.value||"";
+  const dueTime=document.getElementById("q-due-time")?.value||"";
   // Read final XP values from inputs
   const rewardInputs=document.querySelectorAll(".reward-xp-input");
   rewardInputs.forEach((el,i)=>{if(_modalRewards[i])_modalRewards[i].xp=Math.max(1,parseInt(el.value)||1);});
@@ -1555,13 +1566,13 @@ function saveQuest(){
   if(_editingQuest){
     const q=state.quests.find(x=>x.id===_editingQuest.id);
     if(q){
-      q.title=title;q.type=type;q.desc=desc;q.dueDate=dueDate;q.rewards=rewards;
+      q.title=title;q.type=type;q.desc=desc;q.dueDate=dueDate;q.dueTime=dueTime;q.rewards=rewards;
       // legacy compat
       q.rewardSkillId=rewards[0]?.skillId||null;q.rewardXP=rewards[0]?.xp||50;
     }
   } else {
     state.quests.push({
-      id:Date.now(),title,type,desc,dueDate,rewards,
+      id:Date.now(),title,type,desc,dueDate,dueTime,rewards,
       rewardSkillId:rewards[0]?.skillId||null,rewardXP:rewards[0]?.xp||50,
       done:false,completedAt:null,completedCount:0,lastCompletedDate:null,
       createdAt:new Date().toISOString(),
@@ -1570,12 +1581,68 @@ function saveQuest(){
   saveState();closeModal();render();
 }
 
+function downloadICS(id){
+  const q=state.quests.find(x=>x.id===id);
+  if(!q||!q.dueDate)return;
+
+  // Build start datetime
+  const dateStr=q.dueDate; // YYYY-MM-DD
+  const timeStr=q.dueTime||"09:00"; // HH:MM, default 9am if no time set
+  const [y,mo,d]=dateStr.split("-").map(Number);
+  const [h,mi]=timeStr.split(":").map(Number);
+
+  // Format to iCal datetime: YYYYMMDDTHHMMSS (local time with TZID approach)
+  const pad=n=>String(n).padStart(2,"0");
+  const dtStart=`${y}${pad(mo)}${pad(d)}T${pad(h)}${pad(mi)}00`;
+  // End = start + 1 hour
+  const endDate=new Date(y,mo-1,d,h+1,mi);
+  const dtEnd=`${endDate.getFullYear()}${pad(endDate.getMonth()+1)}${pad(endDate.getDate())}T${pad(endDate.getHours())}${pad(endDate.getMinutes())}00`;
+
+  const uid=`quest-${q.id}@skill-pwa`;
+  const now=new Date();
+  const dtStamp=`${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}T${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}Z`;
+  const desc=q.desc?q.desc.replace(/\n/g,"\\n"):"";
+  const alarm=q.dueTime
+    ?`BEGIN:VALARM\r\nTRIGGER:-PT30M\r\nACTION:DISPLAY\r\nDESCRIPTION:${q.title} 即將到期\r\nEND:VALARM\r\n`
+    :"";
+
+  const ics=[
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//人生技能樹//ZH",
+    "CALSCALE:GREGORIAN",
+    "METHOD:PUBLISH",
+    "BEGIN:VEVENT",
+    `UID:${uid}`,
+    `DTSTAMP:${dtStamp}`,
+    `DTSTART:${dtStart}`,
+    `DTEND:${dtEnd}`,
+    `SUMMARY:${q.title}`,
+    `DESCRIPTION:${desc}`,
+    alarm.replace(/\r\n$/, ""),
+    "END:VEVENT",
+    "END:VCALENDAR"
+  ].filter(Boolean).join("\r\n");
+
+  const blob=new Blob([ics],{type:"text/calendar;charset=utf-8"});
+  // iOS Safari doesn't support createObjectURL for file download reliably
+  // Use data URI instead
+  const reader=new FileReader();
+  reader.onload=()=>{
+    const a=document.createElement("a");
+    a.href=reader.result;
+    a.download=`${q.title.replace(/[^\w\u4e00-\u9fff]/g,"_")}.ics`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+  reader.readAsDataURL(blob);
+  showToast("📅 .ics 已下載，點開即可加入日曆");
+}
+
+
 function archiveQuest(id){
   const q=state.quests.find(x=>x.id===id);
-  if(!q)return;
-  q.archived=true;
-  q.archivedAt=new Date().toISOString();
-  saveState(true);render();showToast("📦 已封存任務");
 }
 function unarchiveQuest(id){
   const q=state.quests.find(x=>x.id===id);
