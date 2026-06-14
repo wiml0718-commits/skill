@@ -1643,6 +1643,10 @@ function downloadICS(id){
 
 function archiveQuest(id){
   const q=state.quests.find(x=>x.id===id);
+  if(!q)return;
+  q.archived=true;
+  q.archivedAt=new Date().toISOString();
+  saveState(true);render();showToast("📦 已封存任務");
 }
 function unarchiveQuest(id){
   const q=state.quests.find(x=>x.id===id);
