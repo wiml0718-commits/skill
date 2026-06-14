@@ -1672,9 +1672,9 @@ function clearArchived(){
 
 
 function clearDoneQuests(){
-  const cnt=state.quests.filter(q=>q.done&&q.type!=="daily").length;
+  const cnt=state.quests.filter(q=>q.done&&q.type!=="daily"&&!q.archived).length;
   if(!confirm(`確定清除所有 ${cnt} 個已完成任務？此操作無法復原。`))return;
-  state.quests=state.quests.filter(q=>!(q.done&&q.type!=="daily"));
+  state.quests=state.quests.filter(q=>!(q.done&&q.type!=="daily"&&!q.archived));
   saveState(true);render();showToast(`🗑 已清除 ${cnt} 個已完成任務`);
 }
 
