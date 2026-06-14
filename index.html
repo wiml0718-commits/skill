@@ -1283,15 +1283,15 @@ function renderQuestCard(q, now){
       :`${diff} 天後截止`;
     dueHtml=`<span class="quest-due ${isOverdue?"overdue":isSoon?"soon":"ok"}">📅 ${dueLabel}</span>`;
   }
-  // Build reward display from multi-rewards array
+  // Build skill requirement display from multi-rewards array
   const rewards=q.rewards&&q.rewards.length>0?q.rewards
     :(q.rewardSkillId?[{skillId:q.rewardSkillId,xp:q.rewardXP||50}]:[]);
   const rewardHtml=rewards.length>0
     ?rewards.map(r=>{
         const s=state.subSkills.find(x=>x.id===r.skillId);
-        return s?`<span class="quest-reward">⚡ +${r.xp} EXP → ${s.icon||""} ${s.name}</span>`:"";
+        return s?`<span class="quest-reward">🎯 ${s.icon||""} ${s.name} +${r.xp} EXP</span>`:"";
       }).join("")
-    :`<span class="quest-reward" style="color:var(--muted2)">無獎勵</span>`;
+    :`<span class="quest-reward" style="color:var(--muted2)">無需特定技能</span>`;
 
   const isDailyDone=q.type==="daily"&&isDailyDoneToday(q);
   const cardDone=q.done||isDailyDone;
@@ -1458,11 +1458,11 @@ function showQuestModal(q){
           style="margin-bottom:0;flex:1" placeholder="選填時間"/>
       </div>
 
-      <label class="form-label">完成獎勵 → 子技能 EXP（可多選）</label>
+      <label class="form-label">需要哪些技能 → 完成後給予 EXP（可多選）</label>
       <div id="reward-list" style="margin-bottom:8px"></div>
       <div style="display:flex;gap:6px;margin-bottom:14px">
         <select class="form-select" id="skill-pick-select" style="margin-bottom:0;flex:1">
-          <option value="">選擇子技能加入獎勵…</option>
+          <option value="">選擇需要的子技能…</option>
         </select>
         <button onclick="addRewardSkillFromSelect()"
           style="background:#f59e0b22;border:1px solid #f59e0b66;color:#f59e0b;
@@ -1486,7 +1486,7 @@ function renderRewardList(){
   const el=document.getElementById("reward-list");
   if(!el)return;
   if(_modalRewards.length===0){
-    el.innerHTML='<div style="font-size:10px;color:var(--muted2);padding:4px 0 8px">尚未加入任何獎勵</div>';
+    el.innerHTML='<div style="font-size:10px;color:var(--muted2);padding:4px 0 8px">尚未指定需要的技能</div>';
   } else {
     let rows="";
     _modalRewards.forEach((r,i)=>{
@@ -1517,7 +1517,7 @@ function refreshSkillSelect(){
   if(!sel)return;
   const existing=new Set(_modalRewards.map(r=>r.skillId));
   const available=state.subSkills.filter(s=>!existing.has(s.id));
-  sel.innerHTML=`<option value="">選擇子技能加入獎勵…</option>`
+  sel.innerHTML=`<option value="">選擇需要的子技能…</option>`
     +available.map(s=>{
       const c=CORE_MAP[s.coreId];
       return `<option value="${s.id}">${s.icon||""} ${s.name} (${c?c.title||c.name:""})</option>`;
