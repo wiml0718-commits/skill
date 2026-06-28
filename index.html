@@ -158,7 +158,10 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 .notes-list{margin-bottom:8px;}
 .note-item{display:flex;gap:7px;align-items:flex-start;margin-bottom:6px;}
 .note-text{flex:1;background:var(--bg);border:1px solid var(--border);border-radius:6px;
-  padding:6px 9px;font-size:10px;color:#b0c8d8;line-height:1.5;}
+  padding:6px 9px;font-size:10px;color:#b0c8d8;line-height:1.5;white-space:pre-wrap;}
+.note-text.collapsed{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+.note-toggle{font-size:9px;color:#a855f7;cursor:pointer;margin-top:3px;display:inline-block;
+  font-family:'Share Tech Mono',monospace;}
 .note-date{font-size:8px;color:var(--muted2);display:block;margin-top:2px;}
 .note-del{background:none;border:none;color:#ef444466;cursor:pointer;font-size:14px;padding:4px;flex-shrink:0;}
 .note-add-row{display:flex;gap:6px;}
@@ -530,7 +533,7 @@ function renderDetail(coreId){
               </div>
             </div>
             <div class="sub-desc">${s.desc||""}</div>
-            ${s.source?`<div class="sub-source">📚 ${s.source}</div>`:""}
+            ${s.source?`<div class="sub-source" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">📚 ${s.source}</div>`:""}
             <div class="sub-xp-bar"><div class="sub-xp-fill" style="width:${pct2}%;background:linear-gradient(90deg,${c.color}66,${c.color});box-shadow:0 0 5px ${c.color}"></div></div>
             <div class="sub-xp-row"><span style="color:var(--muted2)">EXP ${s.xp} / Lv${subLv<SUB_MAX_LV?subLv+1:"MAX"} 需 ${subLv<SUB_MAX_LV?LEVEL_XP[subLv+1]:LEVEL_XP[SUB_MAX_LV]}</span><span style="color:${c.color}">${subLv<SUB_MAX_LV?`→ 還差 ${LEVEL_XP[subLv+1]-s.xp}`:"Lv9 MAX ★"}</span></div>
           </div>
@@ -721,9 +724,15 @@ function openMergeSub(coreId){
   const subs=state.subSkills.filter(s=>s.coreId===coreId);
   const overlay=document.createElement("div");
   overlay.className="modal-overlay";overlay.id="merge-overlay";
+  overlay.onclick=e=>{if(e.target===overlay)closeMergeModal();};
   overlay.innerHTML=`
     <div class="modal-box" style="max-height:90vh;overflow-y:auto">
-      <div class="modal-title" style="color:#a855f7">⚗ 合併技能</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+        <div class="modal-title" style="color:#a855f7;margin:0">⚗ 合併技能</div>
+        <button onclick="closeMergeModal()" style="background:var(--bg);border:1px solid var(--border2);
+          color:var(--muted);width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:16px;
+          flex-shrink:0;display:flex;align-items:center;justify-content:center">✕</button>
+      </div>
 
       <label class="form-label">選擇要合併的技能（至少 2 個）</label>
       <div id="merge-sub-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px">
@@ -857,28 +866,37 @@ function confirmMerge(fromCoreId){
   const totalXP=sources.reduce((sum,s)=>sum+(s.xp||0),0);
   const today=new Date().toLocaleDateString("zh-TW");
 
-  // Build detailed merge record listing each skill's name, XP, and source book
+  // Build detailed merge record listing each skill's name, XP, source book, and description
   const sourceLines=sources.map(s=>{
     const bookPart=s.source?` 📚${s.source}`:"";
-    return `・${s.icon||"⭐"}${s.name}（EXP ${s.xp||0}${bookPart}）`;
-  }).join("　");
+    const descPart=s.desc?`\n　　↳ ${s.desc}`:"";
+    return `・${s.icon||"⭐"}${s.name}（EXP ${s.xp||0}${bookPart}）${descPart}`;
+  }).join("\n");
   const mergeRecord={
     id:Date.now()-1,
-    text:`⚗ 合併自：${sourceLines}　合計 EXP ${totalXP}`,
+    text:`⚗ 合併自：\n${sourceLines}\n　合計 EXP ${totalXP}`,
     date:today
   };
 
   // Collect all notes from source skills (preserve original skill attribution via date prefix)
   const mergedNotes=[mergeRecord,...sources.flatMap(s=>s.notes||[])];
 
-  // Merge all unique source books
-  const allSources=sources.map(s=>s.source||"").filter(Boolean);
-  const uniqueSources=[...new Set(allSources)].join(" + ");
+  // Merge all unique source books (limit display to avoid unbounded growth)
+  const allSources=sources.flatMap(s=>(s.source||"").split(/\s*\+\s*/)).map(x=>x.trim()).filter(Boolean);
+  const uniqueArr=[...new Set(allSources)];
+  const uniqueSources=uniqueArr.length<=4
+    ? uniqueArr.join(" + ")
+    : uniqueArr.slice(0,4).join(" + ")+` …等 ${uniqueArr.length} 項`;
+
+  // Build a combined description preserving each source skill's original ability
+  const descParts=sources.filter(s=>s.desc).map(s=>`${s.name}：${s.desc}`);
+  const combinedDesc=desc||descParts.join("　|　");
 
   // Create new merged skill
   const newSkill={
     id:Date.now(),
-    name,icon,desc,
+    name,icon,
+    desc:combinedDesc,
     type,
     coreId:targetCoreId,
     xp:totalXP,
@@ -907,11 +925,16 @@ function renderModal(){
   const existing=document.getElementById("modal");if(existing)existing.remove();
   const d=modalData.data;
   const c=CORE_MAP[d.coreId];
-  const notesHTML=(d.notes||[]).map(n=>`
+  const notesHTML=(d.notes||[]).map(n=>{
+    const isLong=(n.text||"").length>70||(n.text||"").includes("\n");
+    return `
     <div class="note-item" id="note-${n.id}">
-      <div class="note-text">${n.text}<span class="note-date">${n.date}</span></div>
+      <div style="flex:1;min-width:0">
+        <div class="note-text ${isLong?"collapsed":""}" id="ntext-${n.id}">${n.text}<span class="note-date">${n.date}</span></div>
+        ${isLong?`<span class="note-toggle" onclick="toggleNote(${n.id})" id="ntoggle-${n.id}">▼ 展開</span>`:""}
+      </div>
       <button class="note-del" onclick="delNote(${n.id})">✕</button>
-    </div>`).join("");
+    </div>`;}).join("");
 
   const overlay=document.createElement("div");
   overlay.id="modal";overlay.className="modal-overlay";
@@ -919,7 +942,12 @@ function renderModal(){
   overlay.innerHTML=`
     <div class="modal-sheet" id="modal-sheet">
       <div class="modal-handle"></div>
-      <div class="modal-title" style="color:${c.color}">◆ ${modalData.mode==="add"?"新增子技能":"編輯子技能"} ◆</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+        <div class="modal-title" style="color:${c.color};margin:0">◆ ${modalData.mode==="add"?"新增子技能":"編輯子技能"} ◆</div>
+        <button onclick="closeModal()" style="background:var(--bg);border:1px solid var(--border2);
+          color:var(--muted);width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:16px;
+          flex-shrink:0;display:flex;align-items:center;justify-content:center">✕</button>
+      </div>
 
       <label class="form-label">歸屬核心技能</label>
       <select class="form-select" id="m-core" onchange="modalUpdateCore(this.value)">
@@ -995,10 +1023,24 @@ function addNote(){
   const note={id:Date.now(),text:txt,date:new Date().toLocaleDateString("zh-TW")};
   modalData.data.notes.push(note);
   const list=document.getElementById("notes-list");
+  const isLong=txt.length>70||txt.includes("\n");
   const div=document.createElement("div");div.className="note-item";div.id=`note-${note.id}`;
-  div.innerHTML=`<div class="note-text">${note.text}<span class="note-date">${note.date}</span></div>
+  div.innerHTML=`<div style="flex:1;min-width:0">
+      <div class="note-text ${isLong?"collapsed":""}" id="ntext-${note.id}">${note.text}<span class="note-date">${note.date}</span></div>
+      ${isLong?`<span class="note-toggle" onclick="toggleNote(${note.id})" id="ntoggle-${note.id}">▼ 展開</span>`:""}
+    </div>
     <button class="note-del" onclick="delNote(${note.id})">✕</button>`;
   list.appendChild(div);el.value="";
+}
+function toggleNote(id){
+  const el=document.getElementById(`ntext-${id}`);
+  const tog=document.getElementById(`ntoggle-${id}`);
+  if(!el||!tog)return;
+  if(el.classList.contains("collapsed")){
+    el.classList.remove("collapsed");tog.textContent="▲ 收合";
+  }else{
+    el.classList.add("collapsed");tog.textContent="▼ 展開";
+  }
 }
 function delNote(id){
   if(!modalData)return;
