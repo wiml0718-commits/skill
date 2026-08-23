@@ -64,7 +64,7 @@ export function createStore(backend = defaultBackend()){
     try{
       backend.setItem(STORAGE_KEY, JSON.stringify(data));
     }catch{ /* 配額滿或無法寫入時保持記憶體狀態，不讓 UI 崩掉 */ }
-    return data;
+    // 刻意不回傳 data：內部紀錄一律不外流，避免呼叫端繞過驗證改到內部狀態。
   }
 
   function findStep(id){
@@ -101,7 +101,10 @@ export function createStore(backend = defaultBackend()){
       return {version: data.version, goals: copyAll(data.goals), steps: copyAll(data.steps)};
     },
 
-    save(){return persist();},
+    save(){
+      persist();
+      return store.getState();
+    },
 
     // ── Goal ────────────────────────────────────────────────────────────────
     addGoal({title, why = ""} = {}){

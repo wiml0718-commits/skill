@@ -123,6 +123,21 @@ test("推導方法回傳的紀錄同樣是複本", () => {
   assert.equal(store.getState().steps.find(s => s.id === captured.id).goalId, null);
 });
 
+test("save() 回傳的也是複本，不能透過它改到內部狀態", () => {
+  const {store, goal, a} = seeded();
+  const snapshot = store.save();
+
+  snapshot.goals[0].status = "archived";
+  snapshot.steps[0].state = STEP_STATE.DONE;
+  snapshot.goals.length = 0;
+
+  assert.equal(store.getState().goals[0].status, "active");
+  assert.equal(store.getState().steps[0].state, STEP_STATE.TODO);
+  assert.equal(store.getState().goals.length, 1);
+  assert.equal(store.todayList().length, 1);
+  assert.equal(store.nextStep(goal.id).id, a.id);
+});
+
 test("mutation 方法回傳的紀錄也是複本", () => {
   const {store, goal, a} = seeded();
   store.addGoal({title: "另一個"}).title = "被改掉";
