@@ -1,7 +1,8 @@
 # CLAUDE.md
 
-本文件定義 Claude Code（或任何 AI 開發 Agent）在本 repository 的開發規則。
-所有在此 repository 上工作的 AI Agent 都必須遵守。
+本文件定義 Claude Code 在本 repository 的開發規則。
+其他 AI Agent（含擔任 reviewer 的 Codex）在本 repo 工作時應一併遵守；
+Codex Review 也以本文件作為審查依據。
 
 ## 分支規則
 
