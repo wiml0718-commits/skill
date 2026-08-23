@@ -232,6 +232,44 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 .quest-due.ok{color:var(--muted2);}
 .quest-complete-btn{border:none;border-radius:8px;padding:5px 11px;cursor:pointer;
   font-size:11px;font-family:'Cinzel',serif;letter-spacing:1px;flex-shrink:0;}
+/* ── Goal / Step styles ── */
+.goal-add{width:100%;background:#4a9eff11;border:1px dashed var(--border2);color:#4a9eff;
+  border-radius:12px;padding:11px;cursor:pointer;font-size:11px;margin-bottom:10px;
+  font-family:inherit;letter-spacing:1px;}
+.goal-card{background:linear-gradient(135deg,var(--bg3),var(--bg2));
+  border:1px solid var(--border);border-radius:14px;padding:13px 14px;margin-bottom:10px;}
+.goal-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:10px;}
+.goal-title{font-size:14px;font-weight:700;color:var(--text);}
+.goal-why{font-size:10px;color:var(--muted);margin-top:3px;line-height:1.5;}
+.goal-count{font-size:10px;color:var(--muted2);white-space:nowrap;}
+.goal-foot{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;}
+.step-card{background:linear-gradient(135deg,var(--bg3),var(--bg2));
+  border:1px solid var(--border);border-radius:12px;padding:12px 13px;margin-bottom:9px;}
+.step-main{display:flex;align-items:center;gap:10px;}
+.step-main.next{background:#4a9eff0f;border-radius:9px;padding:9px;margin:-2px 0 2px;}
+.step-text{flex:1;min-width:0;}
+.step-title{font-size:13px;color:var(--text);word-break:break-word;}
+.step-goal{font-size:9px;color:var(--muted);margin-top:3px;letter-spacing:1px;}
+.step-row{display:flex;align-items:center;gap:9px;padding:7px 2px;
+  border-bottom:1px solid var(--border);font-size:12px;color:var(--text);}
+.step-row:last-of-type{border-bottom:none;}
+.step-row.is-done{opacity:.45;text-decoration:line-through;}
+.step-row.muted{color:var(--muted2);font-size:11px;justify-content:center;}
+.step-row-title{flex:1;min-width:0;word-break:break-word;}
+.bujo-glyph{display:inline-flex;align-items:center;justify-content:center;
+  width:20px;height:20px;flex-shrink:0;border-radius:6px;background:var(--bg);
+  border:1px solid var(--border2);color:#4a9eff;font-size:12px;line-height:1;}
+.step-actions{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:9px;}
+.step-btn{border:1px solid var(--border2);background:transparent;color:var(--text2);
+  border-radius:8px;padding:5px 11px;cursor:pointer;font-size:10px;font-family:inherit;}
+.step-btn.done{border-color:#22d3ee;color:#22d3ee;background:#22d3ee18;}
+.step-select{border:1px solid var(--border2);background:var(--bg2);color:var(--text2);
+  border-radius:8px;padding:5px 8px;font-size:10px;font-family:inherit;max-width:150px;}
+.step-hint{font-size:10px;color:var(--muted2);}
+.inbox-capture{display:flex;gap:6px;margin-bottom:12px;}
+.inbox-capture input{flex:1;min-width:0;background:var(--bg2);border:1px solid var(--border2);
+  color:var(--text);border-radius:10px;padding:10px 12px;font-size:12px;font-family:inherit;}
+.inbox-capture input:focus{outline:none;border-color:#4a9eff;}
 .quest-add-fab{position:fixed;bottom:calc(72px + var(--safe-bot) + 14px);right:16px;
   width:48px;height:48px;border-radius:50%;border:none;
   background:linear-gradient(135deg,#4a9eff,#a855f7);
@@ -280,6 +318,9 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
     </button>
     <button class="tab" data-tab="quests" onclick="switchTab('quests')">
       <span class="tab-icon">📜</span>任務
+    </button>
+    <button class="tab" data-tab="goals" onclick="switchTab('goals')">
+      <span class="tab-icon">🎯</span>目標
     </button>
     <button class="tab" data-tab="profile" onclick="switchTab('profile')">
       <span class="tab-icon">🧙</span>檔案
@@ -429,6 +470,8 @@ function render(){
       el.innerHTML=renderStats();
     }else if(currentTab==="quests"){
       el.innerHTML=renderQuests();
+    }else if(currentTab==="goals"){
+      el.innerHTML=window.Goals?window.Goals.render():`<div class="empty-state">載入中…</div>`;
     }else{
       el.innerHTML=renderProfile();
     }
@@ -669,7 +712,9 @@ function saveName(){
 }
 
 function exportData(){
-  const blob=new Blob([JSON.stringify(state,null,2)],{type:"application/json"});
+  const payload={...state};
+  if(window.Goals)payload.goalsData=window.Goals.exportPayload();
+  const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});
   const a=document.createElement("a");a.href=URL.createObjectURL(blob);
   a.download="skill-tree-backup.json";a.click();
 }
@@ -695,6 +740,10 @@ function importData(e){
       });
       // Migration: ensure all subSkills have notes array
       d.subSkills.forEach(s=>{if(!s.notes)s.notes=[];});
+      // Goals 資料由 src/store.js 自行保管，抽出後再存回 state
+      const goalsData=d.goalsData;
+      delete d.goalsData;
+      if(goalsData&&window.Goals)window.Goals.importPayload(goalsData);
       state=d;
       saveState(true);render();showToast("✓ 匯入成功");
     }catch(err){
@@ -1755,6 +1804,13 @@ loadState();
 if(state.cores)syncCores();
 checkOverdue();
 render();
+</script>
+<script type="module">
+// 目標 / 下一步的資料模型與檢視。module script 是 deferred，會在上面的
+// inline script 跑完之後才執行，所以掛載完要再重繪一次。
+import {install} from "./src/views.js";
+install();
+if(typeof window.render==="function")window.render();
 </script>
 </body>
 </html>
