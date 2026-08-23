@@ -713,7 +713,14 @@ function saveName(){
 
 function exportData(){
   const payload={...state};
-  if(window.Goals)payload.goalsData=window.Goals.exportPayload();
+  if(window.Goals){
+    payload.goalsData=window.Goals.exportPayload();
+  }else if(!confirm(
+    "目標模組尚未載入，這份備份不會包含目標與步驟。\n"+
+    "（以 file:// 直接開啟時模組無法載入，請改用網址開啟）\n\n"+
+    "仍要匯出不完整的備份嗎？")){
+    return; // 寧可不給備份，也不要給一份看起來成功、實際缺資料的檔案
+  }
   const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});
   const a=document.createElement("a");a.href=URL.createObjectURL(blob);
   a.download="skill-tree-backup.json";a.click();
@@ -743,7 +750,11 @@ function importData(e){
       // Goals 資料由 src/store.js 自行保管，抽出後再存回 state
       const goalsData=d.goalsData;
       delete d.goalsData;
-      if(goalsData&&window.Goals)window.Goals.importPayload(goalsData);
+      // 備份含目標資料但模組沒載入時整筆中止，不要只還原一半卻回報成功
+      if(goalsData&&!window.Goals){
+        throw new Error("備份包含目標資料，但目標模組尚未載入，已中止以免只還原一部分");
+      }
+      if(goalsData)window.Goals.importPayload(goalsData);
       state=d;
       saveState(true);render();showToast("✓ 匯入成功");
     }catch(err){
