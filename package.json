@@ -1,0 +1,10 @@
+{
+  "name": "skill-tree-pwa",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "人生技能樹 PWA",
+  "scripts": {
+    "test": "node --test"
+  }
+}
