@@ -27,7 +27,7 @@ Codex Review 也以本文件作為審查依據。
 - 完成修改後，必須執行 repository 中可用的檢查。本 repository 的指令：
   - lint：`無`
   - typecheck：`無`
-  - test：`無`
+  - test：`npm test`
   - build：`無`
 - **不得假裝測試成功**。無法執行、失敗或環境不支援時，必須在 PR 誠實說明。
 - 不得以「之後再處理」為由略過已知會失敗的測試。
