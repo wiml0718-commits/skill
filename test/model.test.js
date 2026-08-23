@@ -30,6 +30,22 @@ test("createStep 驗證 due 格式與 order 型別", () => {
   assert.throws(() => m.createStep({title: "x", order: 0, state: "?"}), /未知的 step state/);
 });
 
+test("due 必須是實際存在的日期，格式對但日期不存在也要擋", () => {
+  for(const bad of ["2026-02-31", "2026-99-99", "2026-13-01", "2026-00-10", "2025-02-29"]){
+    assert.throws(() => m.createStep({title: "x", order: 0, due: bad}),
+      /不是實際存在的日期/, `${bad} 應該被拒絕`);
+  }
+  for(const ok of ["2026-02-28", "2024-02-29", "2026-12-31", "2026-01-01"]){
+    assert.equal(m.createStep({title: "x", order: 0, due: ok}).due, ok);
+  }
+});
+
+test("scheduleStep 同樣擋掉不存在的日期", () => {
+  const s = m.createStep({id: "s1", title: "x", order: 0});
+  assert.throws(() => m.scheduleStep(s, "2026-02-31"), /不是實際存在的日期/);
+  assert.equal(s.due, null, "驗證失敗不應改動原物件");
+});
+
 test("狀態轉換回傳新物件，不修改原本的 step", () => {
   const s = step("s1", "g1", 0);
   const done = m.completeStep(s);

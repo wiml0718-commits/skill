@@ -47,6 +47,12 @@ function normalizeDue(due){
   if(typeof due !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(due)){
     throw new Error("due 必須是 YYYY-MM-DD 字串或 null");
   }
+  // 光靠格式擋不掉 2026-02-31 這種不存在的日期，實際轉成日期再比對一次。
+  const [y, m, d] = due.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  if(dt.getUTCFullYear() !== y || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d){
+    throw new Error(`due 不是實際存在的日期：${due}`);
+  }
   return due;
 }
 

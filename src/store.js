@@ -25,6 +25,11 @@ export function defaultBackend(){
 
 function emptyData(){return {version: SCHEMA_VERSION, goals: [], steps: []};}
 
+// Goal / Step 都是扁平的純值物件，逐筆展開就足以切斷與內部資料的參照。
+// 只複製陣列不夠：呼叫端仍可透過 snapshot 改到內部紀錄，繞過驗證。
+const copy = rec => (rec ? {...rec} : rec);
+const copyAll = list => list.map(copy);
+
 // 壞掉的單筆資料就丟掉，不讓整包資料因為一筆髒資料而全滅。
 function sanitize(raw){
   const data = emptyData();
@@ -77,7 +82,7 @@ export function createStore(backend = defaultBackend()){
   function replaceStep(i, step){
     data.steps = data.steps.map((s, n) => (n === i ? step : s));
     persist();
-    return step;
+    return copy(step);
   }
 
   const store = {
@@ -93,7 +98,7 @@ export function createStore(backend = defaultBackend()){
 
     // 對外一律回傳複本，避免呼叫端繞過 store 直接改到內部陣列
     getState(){
-      return {version: data.version, goals: [...data.goals], steps: [...data.steps]};
+      return {version: data.version, goals: copyAll(data.goals), steps: copyAll(data.steps)};
     },
 
     save(){return persist();},
@@ -103,7 +108,7 @@ export function createStore(backend = defaultBackend()){
       const goal = model.createGoal({title, why});
       data.goals = [...data.goals, goal];
       persist();
-      return goal;
+      return copy(goal);
     },
 
     updateGoal(id, patch = {}){
@@ -111,7 +116,7 @@ export function createStore(backend = defaultBackend()){
       const goal = model.createGoal({...data.goals[i], ...patch, id});
       data.goals = data.goals.map((g, n) => (n === i ? goal : g));
       persist();
-      return goal;
+      return copy(goal);
     },
 
     setGoalStatus(id, status){return store.updateGoal(id, {status});},
@@ -125,7 +130,7 @@ export function createStore(backend = defaultBackend()){
       });
       data.steps = [...data.steps, step];
       persist();
-      return step;
+      return copy(step);
     },
 
     completeStep(id){
@@ -165,11 +170,14 @@ export function createStore(backend = defaultBackend()){
     },
 
     // ── 推導（轉呼叫 model，讓檢視只需要依賴 store）────────────────────────
-    nextStep(goalId){return model.nextStep(data.steps, goalId);},
-    goalSteps(goalId){return model.goalSteps(data.steps, goalId);},
+    nextStep(goalId){return copy(model.nextStep(data.steps, goalId));},
+    goalSteps(goalId){return copyAll(model.goalSteps(data.steps, goalId));},
     goalProgress(goalId){return model.goalProgress(data.steps, goalId);},
-    inboxSteps(){return model.inboxSteps(data.steps);},
-    todayList(){return model.todayList(data.goals, data.steps);},
+    inboxSteps(){return copyAll(model.inboxSteps(data.steps));},
+    todayList(){
+      return model.todayList(data.goals, data.steps)
+        .map(({goal, step}) => ({goal: copy(goal), step: copy(step)}));
+    },
 
     // ── 備份匯出 / 匯入 ─────────────────────────────────────────────────────
     toJSON(){return store.getState();},

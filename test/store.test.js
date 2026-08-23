@@ -95,6 +95,42 @@ test("getState 回傳複本，外部改動不會污染 store", () => {
   assert.equal(store.nextStep(goal.id).title, "報名");
 });
 
+test("snapshot 內的每一筆紀錄也是複本，不能繞過驗證改到內部資料", () => {
+  const {store, goal, a} = seeded();
+
+  // 只複製陣列的話，這行會讓目標立刻從 todayList 消失
+  store.getState().goals[0].status = "archived";
+  store.toJSON().steps[0].state = STEP_STATE.DONE;
+
+  assert.equal(store.getState().goals[0].status, "active");
+  assert.equal(store.getState().steps[0].state, STEP_STATE.TODO);
+  assert.equal(store.todayList().length, 1);
+  assert.equal(store.nextStep(goal.id).id, a.id);
+});
+
+test("推導方法回傳的紀錄同樣是複本", () => {
+  const {store, goal, a} = seeded();
+
+  store.nextStep(goal.id).title = "被改掉";
+  store.goalSteps(goal.id)[0].order = 999;
+  store.todayList()[0].goal.status = "archived";
+  const captured = store.addStep({title: "收件匣項目"});
+  store.inboxSteps()[0].goalId = goal.id;
+
+  assert.equal(store.getState().steps.find(s => s.id === a.id).title, "報名");
+  assert.equal(store.getState().steps.find(s => s.id === a.id).order, 0);
+  assert.equal(store.getState().goals[0].status, "active");
+  assert.equal(store.getState().steps.find(s => s.id === captured.id).goalId, null);
+});
+
+test("mutation 方法回傳的紀錄也是複本", () => {
+  const {store, goal, a} = seeded();
+  store.addGoal({title: "另一個"}).title = "被改掉";
+  store.completeStep(a.id).state = STEP_STATE.TODO;
+  assert.deepEqual(store.getState().goals.map(g => g.title), ["跑完半馬", "另一個"]);
+  assert.equal(store.getState().steps.find(s => s.id === a.id).state, STEP_STATE.DONE);
+});
+
 test("收件匣項目歸入目標時排到最後，不搶走現有的下一步", () => {
   const {store, goal, a} = seeded();
   const captured = store.addStep({title: "找跑團"});
