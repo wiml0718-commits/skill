@@ -212,6 +212,24 @@ test("指向不存在目標的步驟退回收件匣，不被丟棄", () => {
   assert.deepEqual(store.inboxSteps().map(s => s.title), ["孤兒"]);
 });
 
+test("匯入的備份夾帶惡意 id 時，該筆會被丟棄", () => {
+  const backend = fakeBackend();
+  const store = createStore(backend);
+  store.load();
+
+  store.replaceAll({
+    version: 1,
+    goals: [{id: "g1", title: "正常目標", why: "", status: "active"}],
+    steps: [
+      {id: "'||alert(1)||'", goalId: "g1", title: "惡意", due: null, order: 0, state: "•"},
+      {id: "s1", goalId: "g1", title: "正常步驟", due: null, order: 1, state: "•"},
+    ],
+  });
+
+  assert.deepEqual(store.getState().steps.map(s => s.id), ["s1"]);
+  assert.equal(store.nextStep("g1").title, "正常步驟");
+});
+
 test("replaceAll 用於匯入備份，會覆蓋並寫回 backend", () => {
   const backend = fakeBackend();
   const store = createStore(backend);

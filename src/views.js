@@ -47,12 +47,13 @@ function glyph(state){
   return `<span class="bujo-glyph" title="${esc(STEP_STATE_LABEL[state] || "")}">${esc(state)}</span>`;
 }
 
+// id 一律走 data 屬性交給委派監聽，不插進可執行的 inline handler 字串裡。
 function stepActions(id){
   const q = esc(id);
   return `<div class="step-actions">
-    <button class="step-btn done" onclick="Goals.complete('${q}')">完成</button>
-    <button class="step-btn" onclick="Goals.defer('${q}')">順延</button>
-    <button class="step-btn" onclick="Goals.schedule('${q}')">排程</button>
+    <button class="step-btn done" data-act="complete" data-id="${q}">完成</button>
+    <button class="step-btn" data-act="defer" data-id="${q}">順延</button>
+    <button class="step-btn" data-act="schedule" data-id="${q}">排程</button>
   </div>`;
 }
 
@@ -115,17 +116,17 @@ function renderGoalCard(goal){
     </div>
     ${body}
     <div class="goal-foot">
-      <button class="step-btn" onclick="Goals.addStep('${q}')">＋ 步驟</button>
-      ${hidden > 0 ? `<button class="step-btn" onclick="Goals.toggle('${q}')">其餘 ${hidden} 項</button>` : ""}
-      ${isOpen ? `<button class="step-btn" onclick="Goals.toggle('${q}')">收合</button>` : ""}
-      <button class="step-btn" onclick="Goals.archive('${q}')">封存</button>
+      <button class="step-btn" data-act="add-step" data-id="${q}">＋ 步驟</button>
+      ${hidden > 0 ? `<button class="step-btn" data-act="toggle" data-id="${q}">其餘 ${hidden} 項</button>` : ""}
+      ${isOpen ? `<button class="step-btn" data-act="toggle" data-id="${q}">收合</button>` : ""}
+      <button class="step-btn" data-act="archive" data-id="${q}">封存</button>
     </div>
   </div>`;
 }
 
 function renderGoals(){
   const goals = store.getState().goals.filter(g => g.status === GOAL_STATUS.ACTIVE);
-  const add = `<button class="goal-add" onclick="Goals.addGoal()">＋ 新增目標</button>`;
+  const add = `<button class="goal-add" data-act="add-goal">＋ 新增目標</button>`;
   if(goals.length === 0){
     return `${add}<div class="empty-state">尚未建立目標<br><small>每個目標同時只會顯示一個下一步</small></div>`;
   }
@@ -138,9 +139,8 @@ function renderInbox(){
   const goals = store.getState().goals.filter(g => g.status === GOAL_STATUS.ACTIVE);
 
   const capture = `<div class="inbox-capture">
-    <input id="inbox-input" type="text" placeholder="快速捕捉…" autocomplete="off"
-      onkeydown="if(event.key==='Enter')Goals.capture()"/>
-    <button class="step-btn done" onclick="Goals.capture()">加入</button>
+    <input id="inbox-input" type="text" placeholder="快速捕捉…" autocomplete="off"/>
+    <button class="step-btn done" data-act="capture">加入</button>
   </div>`;
 
   if(items.length === 0){
@@ -156,11 +156,11 @@ function renderInbox(){
     </div>
     <div class="step-actions">
       ${goals.length
-        ? `<select class="step-select" onchange="Goals.assign('${esc(s.id)}', this.value)">
+        ? `<select class="step-select" data-act="assign" data-id="${esc(s.id)}">
              <option value="">歸入目標…</option>${options}
            </select>`
         : `<span class="step-hint">先建立一個目標</span>`}
-      <button class="step-btn done" onclick="Goals.complete('${esc(s.id)}')">完成</button>
+      <button class="step-btn done" data-act="complete" data-id="${esc(s.id)}">完成</button>
     </div>
   </div>`).join("");
 }
@@ -173,7 +173,7 @@ function render(){
     {k: "inbox", label: "收件匣"},
   ].map(t => `<button class="qtab ${sub === t.k ? "active" : ""}"
     style="${sub === t.k ? "background:#4a9eff22;border-color:#4a9eff;color:#4a9eff" : ""}"
-    onclick="Goals.setSub('${t.k}')">${t.label}</button>`).join("");
+    data-act="sub" data-sub="${t.k}">${t.label}</button>`).join("");
 
   const body = sub === "goals" ? renderGoals() : sub === "inbox" ? renderInbox() : renderToday();
   return `<div class="quest-tabs">${tabs}</div>${body}`;
@@ -253,8 +253,40 @@ const api = {
   importPayload(data){store.replaceAll(data);},
 };
 
+// 事件委派：#content 這個元素本身在每次 render 都存在（只有 innerHTML 被換掉），
+// 所以監聽掛一次就夠，也不會干擾其他分頁自己的 inline handler。
+function bind(root){
+  root.addEventListener("click", e => {
+    const el = e.target.closest("[data-act]");
+    if(!el || !root.contains(el)) return;
+    const {act, id, sub: target} = el.dataset;
+    if(act === "sub") return api.setSub(target);
+    if(act === "add-goal") return api.addGoal();
+    if(act === "capture") return api.capture();
+    if(act === "complete") return api.complete(id);
+    if(act === "defer") return api.defer(id);
+    if(act === "schedule") return api.schedule(id);
+    if(act === "add-step") return api.addStep(id);
+    if(act === "toggle") return api.toggle(id);
+    if(act === "archive") return api.archive(id);
+  });
+
+  root.addEventListener("change", e => {
+    const el = e.target.closest('[data-act="assign"]');
+    if(el && root.contains(el)) api.assign(el.dataset.id, el.value);
+  });
+
+  root.addEventListener("keydown", e => {
+    if(e.key === "Enter" && e.target.id === "inbox-input") api.capture();
+  });
+}
+
 export function install(){
   store.load();
-  if(typeof window !== "undefined") window.Goals = api;
+  if(typeof window !== "undefined"){
+    window.Goals = api;
+    const root = document.getElementById("content");
+    if(root) bind(root);
+  }
   return api;
 }

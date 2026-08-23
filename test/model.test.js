@@ -46,6 +46,28 @@ test("scheduleStep 同樣擋掉不存在的日期", () => {
   assert.equal(s.due, null, "驗證失敗不應改動原物件");
 });
 
+test("id 限制字元集，擋掉會夾帶內容的 id", () => {
+  // 這類 id 若進得來，放進 DOM 屬性時可能被當成可執行內容
+  const crafted = ["'||alert(1)||'", 'a"b', "a<b", "a b", "a;b", "x".repeat(65), "a\\b"];
+  for(const bad of crafted){
+    assert.throws(() => m.createStep({id: bad, title: "x", order: 0}),
+      /id 只允許/, `${JSON.stringify(bad)} 應該被拒絕`);
+    assert.throws(() => m.createGoal({id: bad, title: "x"}), /id 只允許/);
+  }
+  for(const ok of ["s_abc-123", "g1", "A_b-C_9"]){
+    assert.equal(m.createStep({id: ok, title: "x", order: 0}).id, ok);
+  }
+});
+
+test("newId 產生的 id 通過自身的驗證", () => {
+  for(let i = 0; i < 5; i++){
+    const g = m.createGoal({title: "x"});
+    const s = m.createStep({title: "x", order: 0});
+    assert.doesNotThrow(() => m.createGoal({id: g.id, title: "x"}));
+    assert.doesNotThrow(() => m.createStep({id: s.id, title: "x", order: 0}));
+  }
+});
+
 test("狀態轉換回傳新物件，不修改原本的 step", () => {
   const s = step("s1", "g1", 0);
   const done = m.completeStep(s);

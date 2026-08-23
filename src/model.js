@@ -35,6 +35,18 @@ export function newId(prefix){
   return `${prefix}_${Date.now().toString(36)}_${_seq.toString(36)}`;
 }
 
+// id 會被放進 DOM 屬性與事件處理，限制字元集可以在資料邊界就擋掉夾帶內容的 id
+// （例如從匯入的備份檔進來的）。newId() 產生的 id 一律符合這個樣式。
+const ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+
+function requireId(id, prefix){
+  if(id === undefined || id === null || id === "") return newId(prefix);
+  if(typeof id !== "string" || !ID_PATTERN.test(id)){
+    throw new Error(`id 只允許英數字、底線與連字號（最多 64 字元）：${id}`);
+  }
+  return id;
+}
+
 // ── 驗證 ─────────────────────────────────────────────────────────────────────
 function requireTitle(title){
   const t = typeof title === "string" ? title.trim() : "";
@@ -65,7 +77,7 @@ function requireStepState(state){
 export function createGoal({id, title, why = "", status = GOAL_STATUS.ACTIVE} = {}){
   if(!ALL_GOAL_STATUS.includes(status)) throw new Error(`未知的 goal status：${status}`);
   return {
-    id: id || newId("g"),
+    id: requireId(id, "g"),
     title: requireTitle(title),
     why: typeof why === "string" ? why.trim() : "",
     status,
@@ -76,7 +88,7 @@ export function createGoal({id, title, why = "", status = GOAL_STATUS.ACTIVE} = 
 export function createStep({id, goalId = null, title, due = null, order, state = STEP_STATE.TODO} = {}){
   if(typeof order !== "number" || !Number.isFinite(order)) throw new Error("order 必須是有限數字");
   return {
-    id: id || newId("s"),
+    id: requireId(id, "s"),
     goalId: goalId ?? null,
     title: requireTitle(title),
     due: normalizeDue(due),
