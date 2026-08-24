@@ -52,9 +52,41 @@ test("pendingQuests 排除完成、封存與每日習慣", () => {
   assert.deepEqual(r.pendingQuests(quests).map(q => q.id), ["q1", "q6"]);
 });
 
+test("stepsInScope 只留進行中目標的步驟與收件匣項目", () => {
+  const goals = [
+    {id: "g1", title: "進行中", why: "", status: "active"},
+    {id: "g2", title: "已封存", why: "", status: "archived"},
+    {id: "g3", title: "已完成", why: "", status: "done"},
+  ];
+  const steps = [
+    {...step("s1", "2026-08-20"), goalId: "g1"},
+    {...step("s2", "2026-08-20"), goalId: "g2"},
+    {...step("s3", "2026-08-20"), goalId: "g3"},
+    {...step("s4", "2026-08-20"), goalId: null},
+    {...step("s5", "2026-08-20"), goalId: "不存在的目標"},
+  ];
+  assert.deepEqual(r.stepsInScope(steps, goals).map(s => s.id), ["s1", "s4"]);
+});
+
+test("沒有給 goals 時只留收件匣項目", () => {
+  const steps = [{...step("s1", "2026-08-20"), goalId: "g1"}, {...step("s2", "2026-08-20"), goalId: null}];
+  assert.deepEqual(r.stepsInScope(steps, []).map(s => s.id), ["s2"]);
+  assert.deepEqual(r.stepsInScope(steps, undefined).map(s => s.id), ["s2"]);
+});
+
+test("封存目標之後，它的逾期步驟不再計入 badge", () => {
+  const steps = [{...step("s1", "2026-08-20"), goalId: "g1"}];
+  const active = [{id: "g1", title: "x", why: "", status: "active"}];
+  const archived = [{id: "g1", title: "x", why: "", status: "archived"}];
+  assert.equal(r.collectDue({steps, goals: active, today: TODAY}).count, 1);
+  assert.equal(r.collectDue({steps, goals: archived, today: TODAY}).count, 0,
+    "封存後不該再替它計數，否則與今日／目標檢視不一致");
+});
+
 test("collectDue 同時涵蓋 Step 與 Quest，只取逾期與今日到期", () => {
   const due = r.collectDue({
     steps: [step("s1", "2026-08-20"), step("s2", TODAY), step("s3", "2026-09-01")],
+    goals: [{id: "g1", title: "x", why: "", status: "active"}],
     quests: [quest("q1", "2026-08-19"), quest("q2", TODAY), quest("q3", "2026-12-01")],
     today: TODAY,
   });
@@ -157,7 +189,10 @@ test("createReminders 在資料源出錯時回 null 而不是拋錯", async () =
 });
 
 test("createReminders.refresh 回傳當下的到期統計", async () => {
-  const store = {getState: () => ({steps: [step("s1", "2020-01-01"), step("s2", "2099-01-01")]})};
+  const store = {getState: () => ({
+    steps: [step("s1", "2020-01-01"), step("s2", "2099-01-01")],
+    goals: [{id: "g1", title: "x", why: "", status: "active"}],
+  })};
   const rem = r.createReminders(store, r.createPrefs(fakeBackend()));
   const due = await rem.refresh([quest("q1", "2020-01-01")]);
   assert.equal(due.count, 2);
@@ -165,6 +200,6 @@ test("createReminders.refresh 回傳當下的到期統計", async () => {
 });
 
 test("status 反映偏好與環境能力", () => {
-  const rem = r.createReminders({getState: () => ({steps: []})}, r.createPrefs(fakeBackend({enabled: true})));
+  const rem = r.createReminders({getState: () => ({steps: [], goals: []})}, r.createPrefs(fakeBackend({enabled: true})));
   assert.deepEqual(rem.status(), {enabled: true, permission: "unsupported", badgeSupported: false});
 });

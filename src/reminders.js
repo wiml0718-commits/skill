@@ -5,7 +5,7 @@
 // Notification Triggers（預約未來時間的本地通知）。因此提醒只在 app 開啟或
 // 回到前景時更新——badge 會留在圖示上直到下次開啟，但通知不是背景鬧鐘。
 
-import {isActionable} from "./model.js";
+import {isActionable, GOAL_STATUS} from "./model.js";
 
 export const DUE = {OVERDUE: "overdue", TODAY: "today", LATER: "later", NONE: "none"};
 
@@ -25,6 +25,14 @@ export function classifyDue(due, today = todayISO()){
   return DUE.LATER;
 }
 
+// 只計入使用者還看得到的步驟：進行中目標底下的，加上收件匣（尚未歸屬目標）的。
+// 封存或已完成目標的步驟不會出現在今日與目標檢視，badge 也不該替它們計數。
+export function stepsInScope(steps, goals){
+  const active = new Set(
+    (goals || []).filter(g => g && g.status === GOAL_STATUS.ACTIVE).map(g => g.id));
+  return (steps || []).filter(s => s && (s.goalId == null || active.has(s.goalId)));
+}
+
 // Step：完成與筆記不需要行動，所以不提醒
 export function pendingSteps(steps){
   return (steps || []).filter(s => s && s.due && isActionable(s.state));
@@ -36,13 +44,13 @@ export function pendingQuests(quests){
     q && q.dueDate && !q.done && !q.archived && q.type !== "daily");
 }
 
-export function collectDue({steps = [], quests = [], today = todayISO()} = {}){
+export function collectDue({steps = [], goals = [], quests = [], today = todayISO()} = {}){
   const items = [];
   const take = (kind, id, title, due) => {
     const bucket = classifyDue(due, today);
     if(bucket === DUE.OVERDUE || bucket === DUE.TODAY) items.push({kind, id, title, due, bucket});
   };
-  for(const s of pendingSteps(steps)) take("step", s.id, s.title, s.due);
+  for(const s of pendingSteps(stepsInScope(steps, goals))) take("step", s.id, s.title, s.due);
   for(const q of pendingQuests(quests)) take("quest", q.id, q.title, q.dueDate);
 
   const overdue = items.filter(i => i.bucket === DUE.OVERDUE);
@@ -161,7 +169,8 @@ export function createReminders(store, prefs = createPrefs()){
     async refresh(quests){
       let due;
       try{
-        due = collectDue({steps: store.getState().steps, quests});
+        const {steps, goals} = store.getState();
+        due = collectDue({steps, goals, quests});
       }catch{
         return null;
       }
