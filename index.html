@@ -485,6 +485,8 @@ function render(){
         padding:10px 20px;cursor:pointer;font-size:12px">← 返回首頁</button>
     </div>`;
   }
+  // 提醒與 badge 依當前資料重算。refresh 內部自行吞錯，不會影響渲染。
+  if(window.Reminders)window.Reminders.refresh(state.quests);
 }
 
 // ── Core List ─────────────────────────────────────────────────────────────────
@@ -697,6 +699,10 @@ function renderProfile(){
       </div>
     </div>
     <div class="stat-block">
+      <div class="stat-block-title">◆ 到期提醒</div>
+      <div id="reminder-panel">${renderReminderPanel()}</div>
+    </div>
+    <div class="stat-block">
       <div class="stat-block-title">◆ 資料管理</div>
       <button onclick="exportData()" style="width:100%;background:var(--bg);border:1px solid var(--border2);color:var(--text);border-radius:8px;padding:11px;cursor:pointer;font-size:12px;margin-bottom:8px">📤 匯出資料 (JSON)</button>
       <input type="file" accept=".json" id="import-input" onchange="importData(event)" style="display:none;position:absolute;"/>
@@ -709,6 +715,42 @@ function renderProfile(){
 function saveName(){
   const v=document.getElementById("name-input")?.value?.trim();
   if(v){state.charName=v;saveState();updateNav();}
+}
+
+function renderReminderPanel(){
+  if(!window.Reminders){
+    return `<div class="stat-row"><span class="stat-lbl">載入中…</span></div>`;
+  }
+  const st=window.Reminders.status();
+  const permLabel={granted:"已允許",denied:"已封鎖",default:"尚未詢問",unsupported:"此瀏覽器不支援"}[st.permission]||st.permission;
+  const rows=[
+    ["App Badge", st.badgeSupported?"支援":"此瀏覽器不支援（多數需先安裝 PWA）"],
+    ["通知權限", permLabel],
+  ].map(([k,v])=>`<div class="stat-row"><span class="stat-lbl">${k}</span><span class="stat-val" style="color:var(--muted)">${v}</span></div>`).join("");
+
+  let action;
+  if(st.permission==="unsupported"){
+    action=`<div class="stat-row"><span class="stat-lbl" style="color:var(--muted2)">此瀏覽器無法顯示系統通知，提醒改以畫面提示呈現</span></div>`;
+  }else if(st.permission==="denied"){
+    action=`<div class="stat-row"><span class="stat-lbl" style="color:var(--muted2)">通知已被瀏覽器封鎖，需到瀏覽器設定解除</span></div>`;
+  }else{
+    action=`<button onclick="toggleReminders()" style="width:100%;background:${st.enabled?"#22d3ee18":"var(--bg)"};border:1px solid ${st.enabled?"#22d3ee":"var(--border2)"};color:${st.enabled?"#22d3ee":"var(--text)"};border-radius:8px;padding:11px;cursor:pointer;font-size:12px">${st.enabled?"✓ 已開啟到期通知":"開啟到期通知"}</button>`;
+  }
+
+  return rows+action+`<div style="font-size:10px;color:var(--muted2);margin-top:8px;line-height:1.6">
+    沒有後端伺服器，因此提醒只在開啟或回到此頁時更新；badge 會留在圖示上直到下次開啟，但不會在背景主動響。
+  </div>`;
+}
+
+async function toggleReminders(){
+  if(!window.Reminders)return;
+  const before=window.Reminders.status();
+  const after=before.enabled?window.Reminders.disable():await window.Reminders.enable();
+  if(!before.enabled&&!after.enabled&&after.permission==="denied"){
+    alert("通知權限已被瀏覽器封鎖，需要到瀏覽器設定中解除才能開啟。");
+  }
+  render();
+  showToast(after.enabled?"✓ 已開啟到期通知":"已關閉到期通知");
 }
 
 function exportData(){

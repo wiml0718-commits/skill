@@ -3,8 +3,10 @@
 
 import {createStore} from "./store.js";
 import {STEP_STATE, STEP_STATE_LABEL, GOAL_STATUS} from "./model.js";
+import {createReminders} from "./reminders.js";
 
 const store = createStore();
+const reminders = createReminders(store);
 
 let sub = "today";            // today | goals | inbox
 const expanded = new Set();   // 展開完整步驟清單的目標 id
@@ -285,6 +287,7 @@ export function install(){
   store.load();
   if(typeof window !== "undefined"){
     window.Goals = api;
+    window.Reminders = reminders;
     const root = document.getElementById("content");
     if(root) bind(root);
   }
