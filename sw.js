@@ -1,4 +1,4 @@
-const CACHE = "skill-tree-v3";
+const CACHE = "skill-tree-v4";
 const ASSETS = ["./index.html", "./manifest.json",
   "./src/model.js", "./src/store.js", "./src/views.js", "./src/reminders.js"];
 self.addEventListener("install", e => {
