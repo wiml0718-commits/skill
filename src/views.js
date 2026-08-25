@@ -2,7 +2,7 @@
 // 今日 / 目標 / 收件匣三個檢視。資料一律經由 store 取得，不直接碰 localStorage。
 
 import {createStore} from "./store.js";
-import {STEP_STATE, STEP_STATE_LABEL, GOAL_STATUS, isStalling, DEFER_WARN_THRESHOLD} from "./model.js";
+import {STEP_STATE, STEP_STATE_LABEL, GOAL_STATUS, hasDeferWarning, DEFER_WARN_THRESHOLD} from "./model.js";
 import {createReminders, todayISO} from "./reminders.js";
 
 const store = createStore();
@@ -46,7 +46,7 @@ function glyph(state){
 
 // 順延次數只在達到門檻時才顯示——一兩次是常態，顯示出來只會變成雜訊
 function deferTag(step){
-  if(!isStalling(step)) return "";
+  if(!hasDeferWarning(step)) return "";
   return `<span class="defer-tag" title="已順延 ${step.deferCount} 次">↻${step.deferCount}</span>`;
 }
 
@@ -105,7 +105,10 @@ function renderGoalCard(goal){
       ${dueLabel(next.due)}
     </div>${stepActions(next.id)}`;
   }else{
-    body = `<div class="step-row muted">${progress.total === 0 ? "尚無步驟" : "全部完成 🎉"}</div>`;
+    const label = progress.total === 0 ? "尚無步驟"
+      : progress.done === progress.total ? "全部完成 🎉"
+      : "沒有可行動的步驟";
+    body = `<div class="step-row muted">${label}</div>`;
   }
 
   const hidden = isOpen ? 0 : Math.max(progress.total - (next ? 1 : 0), 0);
@@ -139,7 +142,9 @@ function renderGoals(){
 
 // ── 收件匣 ───────────────────────────────────────────────────────────────────
 function renderInbox(){
-  const items = store.inboxSteps().filter(s => s.state !== STEP_STATE.DONE);
+  // 已完成與已放棄都不該再佔著收件匣
+  const items = store.inboxSteps().filter(s =>
+    s.state !== STEP_STATE.DONE && s.state !== STEP_STATE.DROPPED);
   const goals = store.getState().goals.filter(g => g.status === GOAL_STATUS.ACTIVE);
 
   const capture = `<div class="inbox-capture">
@@ -298,7 +303,7 @@ const api = {
 
   defer(id){
     const s = store.deferStep(id);
-    toast(isStalling(s) ? `> 已順延（第 ${s.deferCount} 次）` : "> 已順延");
+    toast(hasDeferWarning(s) ? `> 已順延（第 ${s.deferCount} 次）` : "> 已順延");
     repaint();
   },
 

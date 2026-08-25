@@ -157,7 +157,9 @@ export function goalProgress(steps, goalId){
   const own = goalSteps(steps, goalId);
   const done = own.filter(s => s.state === STEP_STATE.DONE).length;
   const notes = own.filter(s => s.state === STEP_STATE.NOTE).length;
-  return {total: own.length, done, notes, remaining: own.length - done - notes};
+  const dropped = own.filter(s => s.state === STEP_STATE.DROPPED).length;
+  return {total: own.length, done, notes, dropped,
+          remaining: own.length - done - notes - dropped};
 }
 
 // 收件匣：尚未歸屬任何目標的快速捕捉項目（含已完成，由檢視自行決定顯不顯示）
@@ -175,8 +177,20 @@ export function daysBetween(fromISO, toISO){
   return Math.round((parse(toISO) - parse(fromISO)) / 86400000);
 }
 
-export function isStalling(step){
+// 達到門檻就值得被看見（徽章用）。這只描述「被推遲過很多次」這個事實。
+export function hasDeferWarning(step){
   return !!step && isActionable(step.state) && normalizeDeferCount(step.deferCount) >= DEFER_WARN_THRESHOLD;
+}
+
+// 已排到今天或未來，代表使用者已經做出承諾，在那天到來之前不需要再被問一次。
+function hasFutureCommitment(step, today){
+  return step.state === STEP_STATE.SCHEDULED && !!step.due && step.due >= today;
+}
+
+// 「還需要重新決定嗎」是另一回事：排定日期就是一種決定，所以會解除回顧。
+// 次數本身不重置——歷史保留，只是暫時不再要求決定；日期過了又沒動作就會再回來。
+export function isStalling(step, today){
+  return hasDeferWarning(step) && !hasFutureCommitment(step, today);
 }
 
 export function isLongOverdue(step, today){
@@ -191,7 +205,7 @@ export function reviewItems(goals, steps, today){
   const activeIds = new Set(active.map(g => g.id));
   const visible = (steps || []).filter(s => s && (s.goalId == null || activeIds.has(s.goalId)));
 
-  const stalling = visible.filter(isStalling).sort((a, b) =>
+  const stalling = visible.filter(s => isStalling(s, today)).sort((a, b) =>
     (b.deferCount || 0) - (a.deferCount || 0) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 
   // 已經在反覆順延清單裡的就不重複列，免得同一件事出現兩次

@@ -181,7 +181,8 @@ test("goalProgress 分別統計完成、筆記與剩餘", () => {
     step("s3", "g1", 2),
     step("s4", "g1", 3),
   ];
-  assert.deepEqual(m.goalProgress(steps, "g1"), {total: 4, done: 1, notes: 1, remaining: 2});
+  assert.deepEqual(m.goalProgress(steps, "g1"),
+    {total: 4, done: 1, notes: 1, dropped: 0, remaining: 2});
 });
 
 test("todayList 每個進行中目標只給一個下一步", () => {
@@ -227,18 +228,45 @@ test("daysBetween 用 UTC 算術，跨月與跨年都正確", () => {
   assert.equal(m.daysBetween("2026-08-25", "2026-08-24"), -1, "未來的日期給負數");
 });
 
-test("isStalling 在門檻以下不觸發，達到門檻才觸發", () => {
+test("hasDeferWarning 在門檻以下不觸發，達到門檻才觸發", () => {
   assert.equal(m.DEFER_WARN_THRESHOLD, 3);
-  assert.equal(m.isStalling(deferred("s1", "g1", 2)), false);
-  assert.equal(m.isStalling(deferred("s1", "g1", 3)), true);
-  assert.equal(m.isStalling(deferred("s1", "g1", 9)), true);
+  assert.equal(m.hasDeferWarning(deferred("s1", "g1", 2)), false);
+  assert.equal(m.hasDeferWarning(deferred("s1", "g1", 3)), true);
+  assert.equal(m.hasDeferWarning(deferred("s1", "g1", 9)), true);
 });
 
 test("已完成、筆記或放棄的步驟不算卡住，即使順延過很多次", () => {
   const s = deferred("s1", "g1", 5);
-  assert.equal(m.isStalling(m.completeStep(s)), false);
-  assert.equal(m.isStalling(m.noteStep(s)), false);
-  assert.equal(m.isStalling(m.dropStep(s)), false);
+  for(const t of [m.completeStep(s), m.noteStep(s), m.dropStep(s)]){
+    assert.equal(m.hasDeferWarning(t), false);
+    assert.equal(m.isStalling(t, TODAY), false);
+  }
+});
+
+test("排定到今天或未來就解除回顧，但次數與徽章都保留", () => {
+  const s = deferred("s1", "g1", 4);
+  assert.equal(m.isStalling(s, TODAY), true, "還沒排程時要求決定");
+
+  const future = m.scheduleStep(s, "2026-12-31");
+  assert.equal(m.isStalling(future, TODAY), false, "排到未來 = 已經做了決定");
+  assert.equal(future.deferCount, 4, "次數不重置，歷史保留");
+  assert.equal(m.hasDeferWarning(future), true, "徽章仍顯示，使用者看得到被推遲過幾次");
+
+  const todaySchedule = m.scheduleStep(s, TODAY);
+  assert.equal(m.isStalling(todaySchedule, TODAY), false, "排在今天也算已決定");
+});
+
+test("排定的日期過了又沒動作，就重新回到回顧", () => {
+  const scheduled = m.scheduleStep(deferred("s1", "g1", 4), "2026-08-20");
+  assert.equal(m.isStalling(scheduled, "2026-08-19"), false, "日期還沒到");
+  assert.equal(m.isStalling(scheduled, "2026-08-21"), true, "日期過了就再問一次");
+});
+
+test("順延狀態即使帶著舊的到期日也不算已決定", () => {
+  // 順延不是承諾，所以殘留的 due 不該讓它逃過回顧
+  const s = {...deferred("s1", "g1", 4), due: "2099-01-01"};
+  assert.equal(s.state, DEFERRED);
+  assert.equal(m.isStalling(s, TODAY), true);
 });
 
 test("isLongOverdue 以 7 天為界", () => {
@@ -249,6 +277,35 @@ test("isLongOverdue 以 7 天為界", () => {
   assert.equal(m.isLongOverdue(at("2026-09-01"), TODAY), false, "還沒到期");
   assert.equal(m.isLongOverdue(at(null), TODAY), false, "沒有到期日就不算");
   assert.equal(m.isLongOverdue(m.completeStep(at("2026-01-01")), TODAY), false, "完成的不算");
+});
+
+test("在回顧裡重新排程之後，該項就從清單消失", () => {
+  const goals = [goal("g1")];
+  const stuck = deferred("s1", "g1", 4);
+  assert.equal(m.reviewItems(goals, [stuck], TODAY).stalling.length, 1);
+  const rescheduled = m.scheduleStep(stuck, "2026-12-31");
+  assert.equal(m.reviewItems(goals, [rescheduled], TODAY).stalling.length, 0,
+    "回顧文案建議排定日期，做了就該被解除");
+});
+
+test("goalProgress 把放棄與完成分開計", () => {
+  const steps = [
+    m.completeStep(m.createStep({id: "s1", goalId: "g1", title: "a", order: 0})),
+    m.dropStep(m.createStep({id: "s2", goalId: "g1", title: "b", order: 1})),
+    m.noteStep(m.createStep({id: "s3", goalId: "g1", title: "c", order: 2})),
+    m.createStep({id: "s4", goalId: "g1", title: "d", order: 3}),
+  ];
+  assert.deepEqual(m.goalProgress(steps, "g1"),
+    {total: 4, done: 1, notes: 1, dropped: 1, remaining: 1});
+});
+
+test("只剩放棄的目標：沒有下一步，但完成數仍是 0", () => {
+  const dropped = m.dropStep(m.createStep({id: "s1", goalId: "g1", title: "x", order: 0}));
+  assert.equal(m.nextStep([dropped], "g1"), null);
+  const p = m.goalProgress([dropped], "g1");
+  assert.equal(p.done, 0, "不能被當成全部完成");
+  assert.equal(p.total, 1);
+  assert.equal(p.dropped, 1);
 });
 
 test("reviewItems 收集三種需要決定的情況", () => {
