@@ -156,6 +156,11 @@ export function createStore(backend = defaultBackend()){
       return replaceStep(i, model.noteStep(data.steps[i]));
     },
 
+    dropStep(id){
+      const i = findStep(id);
+      return replaceStep(i, model.dropStep(data.steps[i]));
+    },
+
     scheduleStep(id, due){
       const i = findStep(id);
       return replaceStep(i, model.scheduleStep(data.steps[i], due));
@@ -177,6 +182,15 @@ export function createStore(backend = defaultBackend()){
     goalSteps(goalId){return copyAll(model.goalSteps(data.steps, goalId));},
     goalProgress(goalId){return model.goalProgress(data.steps, goalId);},
     inboxSteps(){return copyAll(model.inboxSteps(data.steps));},
+    reviewItems(today){
+      const r = model.reviewItems(data.goals, data.steps, today);
+      return {
+        stalling: copyAll(r.stalling),
+        longOverdue: copyAll(r.longOverdue),
+        stalledGoals: copyAll(r.stalledGoals),
+        total: r.total,
+      };
+    },
     todayList(){
       return model.todayList(data.goals, data.steps)
         .map(({goal, step}) => ({goal: copy(goal), step: copy(step)}));

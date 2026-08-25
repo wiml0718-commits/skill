@@ -2,8 +2,8 @@
 // 今日 / 目標 / 收件匣三個檢視。資料一律經由 store 取得，不直接碰 localStorage。
 
 import {createStore} from "./store.js";
-import {STEP_STATE, STEP_STATE_LABEL, GOAL_STATUS} from "./model.js";
-import {createReminders} from "./reminders.js";
+import {STEP_STATE, STEP_STATE_LABEL, GOAL_STATUS, hasDeferWarning, DEFER_WARN_THRESHOLD} from "./model.js";
+import {createReminders, todayISO} from "./reminders.js";
 
 const store = createStore();
 const reminders = createReminders(store);
@@ -25,11 +25,6 @@ function repaint(){
   if(typeof window !== "undefined" && typeof window.render === "function") window.render();
 }
 
-function todayISO(){
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
 function dueClass(due){
   if(!due) return "";
   const today = todayISO();
@@ -49,6 +44,12 @@ function glyph(state){
   return `<span class="bujo-glyph" title="${esc(STEP_STATE_LABEL[state] || "")}">${esc(state)}</span>`;
 }
 
+// 順延次數只在達到門檻時才顯示——一兩次是常態，顯示出來只會變成雜訊
+function deferTag(step){
+  if(!hasDeferWarning(step)) return "";
+  return `<span class="defer-tag" title="已順延 ${step.deferCount} 次">↻${step.deferCount}</span>`;
+}
+
 // id 一律走 data 屬性交給委派監聽，不插進可執行的 inline handler 字串裡。
 function stepActions(id){
   const q = esc(id);
@@ -56,6 +57,7 @@ function stepActions(id){
     <button class="step-btn done" data-act="complete" data-id="${q}">完成</button>
     <button class="step-btn" data-act="defer" data-id="${q}">順延</button>
     <button class="step-btn" data-act="schedule" data-id="${q}">排程</button>
+    <button class="step-btn drop" data-act="drop" data-id="${q}">放棄</button>
   </div>`;
 }
 
@@ -69,7 +71,7 @@ function renderToday(){
     <div class="step-main">
       ${glyph(step.state)}
       <div class="step-text">
-        <div class="step-title">${esc(step.title)}</div>
+        <div class="step-title">${esc(step.title)}${deferTag(step)}</div>
         <div class="step-goal">${esc(goal.title)}</div>
       </div>
       ${dueLabel(step.due)}
@@ -88,22 +90,25 @@ function renderGoalCard(goal){
   // 核心規則：預設只顯示一個下一步，其餘收合，避免清單膨脹。
   let body;
   if(isOpen){
-    body = store.goalSteps(goal.id).map(s => `<div class="step-row ${s.state === STEP_STATE.DONE ? "is-done" : ""}">
+    body = store.goalSteps(goal.id).map(s => `<div class="step-row ${s.state === STEP_STATE.DONE || s.state === STEP_STATE.DROPPED ? "is-done" : ""}">
       ${glyph(s.state)}
-      <span class="step-row-title">${esc(s.title)}</span>
+      <span class="step-row-title">${esc(s.title)}${deferTag(s)}</span>
       ${dueLabel(s.due)}
     </div>`).join("") || `<div class="step-row muted">尚無步驟</div>`;
   }else if(next){
     body = `<div class="step-main next">
       ${glyph(next.state)}
       <div class="step-text">
-        <div class="step-title">${esc(next.title)}</div>
+        <div class="step-title">${esc(next.title)}${deferTag(next)}</div>
         <div class="step-goal">下一步</div>
       </div>
       ${dueLabel(next.due)}
     </div>${stepActions(next.id)}`;
   }else{
-    body = `<div class="step-row muted">${progress.total === 0 ? "尚無步驟" : "全部完成 🎉"}</div>`;
+    const label = progress.total === 0 ? "尚無步驟"
+      : progress.done === progress.total ? "全部完成 🎉"
+      : "沒有可行動的步驟";
+    body = `<div class="step-row muted">${label}</div>`;
   }
 
   const hidden = isOpen ? 0 : Math.max(progress.total - (next ? 1 : 0), 0);
@@ -137,7 +142,9 @@ function renderGoals(){
 
 // ── 收件匣 ───────────────────────────────────────────────────────────────────
 function renderInbox(){
-  const items = store.inboxSteps().filter(s => s.state !== STEP_STATE.DONE);
+  // 已完成與已放棄都不該再佔著收件匣
+  const items = store.inboxSteps().filter(s =>
+    s.state !== STEP_STATE.DONE && s.state !== STEP_STATE.DROPPED);
   const goals = store.getState().goals.filter(g => g.status === GOAL_STATUS.ACTIVE);
 
   const capture = `<div class="inbox-capture">
@@ -167,17 +174,89 @@ function renderInbox(){
   </div>`).join("");
 }
 
+// ── 回顧 ─────────────────────────────────────────────────────────────────────
+function reviewStepRow(s, note){
+  return `<div class="step-card">
+    <div class="step-main">
+      ${glyph(s.state)}
+      <div class="step-text">
+        <div class="step-title">${esc(s.title)}${deferTag(s)}</div>
+        <div class="step-goal">${esc(note)}</div>
+      </div>
+      ${dueLabel(s.due)}
+    </div>
+    ${stepActions(s.id)}
+  </div>`;
+}
+
+function renderReview(){
+  const r = store.reviewItems(todayISO());
+  if(r.total === 0){
+    return `<div class="empty-state">沒有需要重新決定的事<br><small>順延 ${DEFER_WARN_THRESHOLD} 次以上、逾期過久，或失去下一步的目標會出現在這裡</small></div>`;
+  }
+
+  const section = (title, hint, body) =>
+    `<div class="review-section">
+      <div class="review-head">${esc(title)}</div>
+      <div class="review-hint">${esc(hint)}</div>
+      ${body}
+    </div>`;
+
+  let out = "";
+
+  if(r.stalling.length){
+    out += section(`反覆順延（${r.stalling.length}）`,
+      "一直推遲通常代表這一步太大、時機不對，或其實不重要。拆小、排定日期，或放棄。",
+      r.stalling.map(s => reviewStepRow(s, `已順延 ${s.deferCount} 次`)).join(""));
+  }
+
+  if(r.longOverdue.length){
+    out += section(`逾期過久（${r.longOverdue.length}）`,
+      "已經過期一段時間了。重新排一個做得到的日期，或承認它不會發生。",
+      r.longOverdue.map(s => reviewStepRow(s, `到期日 ${s.due}`)).join(""));
+  }
+
+  if(r.stalledGoals.length){
+    out += section(`失去下一步的目標（${r.stalledGoals.length}）`,
+      "沒有任何可行動的步驟。補一步，或把目標收掉。",
+      r.stalledGoals.map(g => {
+        const p = store.goalProgress(g.id);
+        const q = esc(g.id);
+        return `<div class="goal-card">
+          <div class="goal-head">
+            <div>
+              <div class="goal-title">${esc(g.title)}</div>
+              ${g.why ? `<div class="goal-why">${esc(g.why)}</div>` : ""}
+            </div>
+            <div class="goal-count">${p.done}/${p.total}</div>
+          </div>
+          <div class="step-row muted">${p.total === 0 ? "尚無步驟" : "沒有可行動的下一步"}</div>
+          <div class="goal-foot">
+            <button class="step-btn" data-act="add-step" data-id="${q}">＋ 步驟</button>
+            <button class="step-btn" data-act="archive" data-id="${q}">封存</button>
+          </div>
+        </div>`;
+      }).join(""));
+  }
+
+  return out;
+}
+
 // ── 進入點 ───────────────────────────────────────────────────────────────────
 function render(){
   const tabs = [
     {k: "today", label: "今日"},
     {k: "goals", label: "目標"},
     {k: "inbox", label: "收件匣"},
+    {k: "review", label: "回顧"},
   ].map(t => `<button class="qtab ${sub === t.k ? "active" : ""}"
     style="${sub === t.k ? "background:#4a9eff22;border-color:#4a9eff;color:#4a9eff" : ""}"
     data-act="sub" data-sub="${t.k}">${t.label}</button>`).join("");
 
-  const body = sub === "goals" ? renderGoals() : sub === "inbox" ? renderInbox() : renderToday();
+  const body = sub === "goals" ? renderGoals()
+    : sub === "inbox" ? renderInbox()
+    : sub === "review" ? renderReview()
+    : renderToday();
   return `<div class="quest-tabs">${tabs}</div>${body}`;
 }
 
@@ -222,7 +301,18 @@ const api = {
 
   complete(id){store.completeStep(id); toast("✓ 完成"); repaint();},
 
-  defer(id){store.deferStep(id); toast("> 已順延"); repaint();},
+  defer(id){
+    const s = store.deferStep(id);
+    toast(hasDeferWarning(s) ? `> 已順延（第 ${s.deferCount} 次）` : "> 已順延");
+    repaint();
+  },
+
+  drop(id){
+    if(!confirm("放棄這個步驟？它會留下紀錄但不再需要行動。")) return;
+    store.dropStep(id);
+    toast("~ 已放棄");
+    repaint();
+  },
 
   schedule(id){
     const due = prompt("排到哪一天？（YYYY-MM-DD，留空取消）", todayISO());
@@ -267,6 +357,7 @@ function bind(root){
     if(act === "capture") return api.capture();
     if(act === "complete") return api.complete(id);
     if(act === "defer") return api.defer(id);
+    if(act === "drop") return api.drop(id);
     if(act === "schedule") return api.schedule(id);
     if(act === "add-step") return api.addStep(id);
     if(act === "toggle") return api.toggle(id);

@@ -203,3 +203,12 @@ test("status 反映偏好與環境能力", () => {
   const rem = r.createReminders({getState: () => ({steps: [], goals: []})}, r.createPrefs(fakeBackend({enabled: true})));
   assert.deepEqual(rem.status(), {enabled: true, permission: "unsupported", badgeSupported: false});
 });
+
+test("放棄的步驟不計入 badge", () => {
+  const dropped = {...step("s1", "2020-01-01"), goalId: "g1", state: STEP_STATE.DROPPED};
+  const open = {...step("s2", "2020-01-01"), goalId: "g1"};
+  const goals = [{id: "g1", title: "x", why: "", status: "active"}];
+  assert.deepEqual(
+    r.collectDue({steps: [dropped, open], goals, today: TODAY}).items.map(i => i.id),
+    ["s2"]);
+});

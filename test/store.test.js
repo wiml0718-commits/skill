@@ -176,7 +176,8 @@ test("todayList 每個進行中目標各一個下一步，封存的不列入", (
 test("goalProgress 反映完成進度", () => {
   const {store, goal, a} = seeded();
   store.completeStep(a.id);
-  assert.deepEqual(store.goalProgress(goal.id), {total: 2, done: 1, notes: 0, remaining: 1});
+  assert.deepEqual(store.goalProgress(goal.id),
+    {total: 2, done: 1, notes: 0, dropped: 0, remaining: 1});
 });
 
 test("損毀的 JSON 視同空資料，不丟例外", () => {
@@ -264,4 +265,75 @@ test("backend 寫入失敗時不讓呼叫端崩潰", () => {
   store.load();
   assert.doesNotThrow(() => store.addGoal({title: "仍可操作"}));
   assert.equal(store.getState().goals.length, 1);
+});
+
+test("順延經由 store 也會累加計數", () => {
+  const {store, a} = seeded();
+  assert.equal(store.getState().steps.find(s => s.id === a.id).deferCount, 0);
+  store.deferStep(a.id);
+  store.deferStep(a.id);
+  assert.equal(store.getState().steps.find(s => s.id === a.id).deferCount, 2);
+});
+
+test("放棄的步驟不再是下一步", () => {
+  const {store, goal, a, b} = seeded();
+  assert.equal(store.nextStep(goal.id).id, a.id);
+  store.dropStep(a.id);
+  assert.equal(store.getState().steps.find(s => s.id === a.id).state, STEP_STATE.DROPPED);
+  assert.equal(store.nextStep(goal.id).id, b.id);
+});
+
+test("dropStep 對不存在的 id 拋錯", () => {
+  const {store} = seeded();
+  assert.throws(() => store.dropStep("nope"), /找不到 step/);
+});
+
+test("reviewItems 經由 store 取得，且回傳複本", () => {
+  const {store, goal, a} = seeded();
+  for(let i = 0; i < 3; i++) store.deferStep(a.id);
+
+  const r = store.reviewItems("2026-08-24");
+  assert.deepEqual(r.stalling.map(s => s.id), [a.id]);
+  assert.equal(r.total, 1);
+
+  r.stalling[0].deferCount = 99;
+  r.stalledGoals.push({id: "x"});
+  assert.equal(store.reviewItems("2026-08-24").stalling[0].deferCount, 3);
+  assert.equal(store.reviewItems("2026-08-24").stalledGoals.length, 0);
+});
+
+test("重新載入後順延次數仍在", () => {
+  const backend = fakeBackend();
+  const store = createStore(backend);
+  store.load();
+  const g = store.addGoal({title: "半馬"});
+  const s = store.addStep({goalId: g.id, title: "報名"});
+  store.deferStep(s.id);
+  store.deferStep(s.id);
+
+  const again = createStore(backend);
+  again.load();
+  assert.equal(again.getState().steps[0].deferCount, 2);
+});
+
+test("放棄的收件匣項目不再出現在可處理的清單裡", () => {
+  const {store} = seeded();
+  const a = store.addStep({title: "收件匣 A"});
+  const b = store.addStep({title: "收件匣 B"});
+  store.dropStep(a.id);
+
+  const visible = store.inboxSteps().filter(s =>
+    s.state !== STEP_STATE.DONE && s.state !== STEP_STATE.DROPPED);
+  assert.deepEqual(visible.map(s => s.id), [b.id]);
+});
+
+test("在回顧裡排程之後就從回顧消失，次數仍保留", () => {
+  const {store, a} = seeded();
+  for(let i = 0; i < 3; i++) store.deferStep(a.id);
+  assert.equal(store.reviewItems("2026-08-25").stalling.length, 1);
+
+  store.scheduleStep(a.id, "2026-12-31");
+  assert.equal(store.reviewItems("2026-08-25").stalling.length, 0);
+  assert.equal(store.getState().steps.find(s => s.id === a.id).deferCount, 3);
+  assert.equal(store.reviewItems("2027-01-01").stalling.length, 1, "日期過了再回來");
 });
