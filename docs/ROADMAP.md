@@ -44,6 +44,8 @@
 - 遷移跳過的壞資料筆數有回報，不靜默吞掉。
 - 一般備份（欠缺 v2 新欄位）遷移後全部通過模型驗證，不會被 sanitize 整批丟掉。
 - 同類 legacy id 重複時每筆都拿到唯一新 id，沒有任何一筆被去重吃掉。
+- 舊 id 重複時 reward 依 first-match 改寫，與 legacy `find()` 的既有語意一致。
+- `meta.inboxPeak` 使用 §6.2 的收件匣待處理 predicate，不是 `inboxSteps` 全集。
 - 測試涵蓋：完整遷移、缺欄位（§7.3 每個預設值）、壞資料、同類 id 重複、
   reward skillId 改寫與查無對應、done+archived 並存、無 goalId 的 main、
   重複遷移（第二次不應再跑）。
@@ -69,6 +71,7 @@
 - 未歸屬的完成會寫下 `skillId: null` 的 `xpLog`；事後指定核心是更新該筆而非
   新增一筆，總 XP 不重複計算。
 - `rollup` 紀錄能通過載入驗證，不會被當成髒資料丟棄。
+- `skillId: null` 的紀錄超過 400 天仍不被壓成 rollup，逐筆待歸屬清單不失真。
 - 合併技能寫下的 `xpLog` 金額為 `0`，且每日 / 每週 XP 加總排除 `source: "merge"`，
   合併當天的成果數字不因合併而膨脹。
 - 測試涵蓋：四種 kind 的預設值、多筆 rewards、未歸屬與事後歸屬、xpLog 上限與
@@ -110,6 +113,8 @@
 - 成就一旦解鎖不會因資料變動被收回。
 - `inbox_zero` 與 `review_clear` 靠 `meta.inboxPeak` / `meta.reviewPeak` 判定，
   重新載入 App 後仍解鎖得了。
+- 把五筆收件匣項目逐一「完成」（而非刪除或指派）後 `inbox_zero` 會解鎖，
+  計數與高水位共用同一個 predicate。
 - 稱號同分時結果穩定，不會每次重繪跳動。
 - 雷達圖在 9 個核心都是 Lv1 與差距極大時都不變形。
 - 測試涵蓋：每一條成就的觸發與不觸發、稱號推導、屬性推導。

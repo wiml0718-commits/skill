@@ -116,7 +116,7 @@ storage key：`skill-rpg-v2`。所有實體都是扁平純值物件，轉換一�
   xp: number, rewards: Reward[],
   streakHistory: string[], completedCount: number, lastCompletedDate: string|null,
   archived: boolean, archivedAt: ISO|null,
-  createdAt: ISO, completedAt: ISO|null }
+  createdAt: ISO|null, completedAt: ISO|null }
 ```
 
 `Reward` = `{ skillId, xp }`。`StepState` 沿用現有 BuJo 符號
@@ -169,6 +169,11 @@ schema 驗證會把自己寫出的彙總資料當成髒資料丟掉。
 
 **體積控制**：單筆約 100 bytes。保留最近 400 天的逐筆紀錄；更舊的資料在載入時
 壓縮成每月每技能一筆 rollup。此上限必須在 store 層強制執行，不能只靠 UI。
+
+**`skillId: null` 的紀錄永遠不進 rollup**，不論多舊，直到歸屬完成為止。彙總會把
+同月多筆壓成一筆並清掉 `refId`，未歸屬紀錄一旦被壓，待歸屬清單就再也說不出這筆
+XP 來自哪個步驟，同月的多筆也無法分派到不同核心。歸屬完成後該筆才回到一般的
+壓縮規則。這批紀錄數量本來就受使用者主動歸屬的行為約束，不會無限成長。
 
 ### 3.7 achievements
 
@@ -320,8 +325,16 @@ XP 不得為負；扣分請以修正紀錄的方式處理，不在本輪範圍�
 | `total_lv50` / `total_lv100` | 總等級達 50 / 100 |
 | `all_cores_lv5` | 9 個內建核心全部達 Lv5 |
 | `first_merge` | 首次合併技能 |
-| `inbox_zero` | 目前收件匣為 0 筆，且 `meta.inboxPeak >= 5` |
+| `inbox_zero` | 收件匣待處理數為 0，且 `meta.inboxPeak >= 5` |
 | `review_clear` | 目前回顧清單為 0 項，且 `meta.reviewPeak >= 3` |
+
+**收件匣待處理數的定義**：`kind === "inbox"`、`archived !== true`，且 `state` 不是
+`×` DONE 也不是 `~` DROPPED。`meta.inboxPeak` 與 `inbox_zero` 必須用同一個
+predicate，實作時共用同一個函式。
+
+現有 `inboxSteps`（`src/model.js`）是「所有 `goalId` 為 null 的 step，含已完成」，
+不能直接拿來計數：inbox 完成後 `goalId` 仍是 `null`，用那個集合算，完成五筆之後
+數量還是五，`inbox_zero` 只能靠刪除或重新指派才解得開，與成就的本意相反。
 
 解鎖時以現有 toast 呈現。是否額外發系統通知列為待確認（§9）。
 
@@ -400,6 +413,13 @@ reward 對照也會指向錯的技能。因此遷移必須：
 2. 把「舊 id + 型別 + 出現序」到新 id 的對應寫進遷移期間的對照表，reward 與
    `goalId` 等所有引用一律查表改寫，不得各自重算。
 3. 產生過後綴的筆數計入遷移回報。
+
+**引用改寫採 first-match。** 對照表的鍵含出現序，但 `rewards[].skillId` 與
+`rewardSkillId` 只帶舊數字 id，沒有出現序可用。因此遷移要另外維護一份
+「舊 id → 該型別第一筆的新 id」的引用查詢表，所有 reward 都查這一份。這與 legacy
+執行路徑一致：`index.html:1443`、`1544`、`1645` 都用 `find()` 取第一筆，所以舊
+資料在碰撞情況下的實際語意本來就是「指向第一筆」。沿用同一規則不會改變任何既有
+行為；若改指向後綴筆，反而會把 XP 發到使用者從沒看過的那個技能上。
 
 去重只能用在真正的重複資料上，不能拿來掩蓋 id 生成不唯一。
 
