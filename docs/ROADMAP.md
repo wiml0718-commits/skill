@@ -27,17 +27,23 @@
 - 新增 `src/migrate.js`：v1 → v2 轉換，含 §7.2 完整對照表與 `skill-backup-v1` 備份。
 - `src/store.js` 改用 `skill-rpg-v2`，管理 `profile` / `cores` / `skills` /
   `goals` / `steps` / `xpLog` / `achievements` / `meta`。
-- `src/model.js` 擴充 Step 欄位（`kind`、`xp`、`rewards`、`streakHistory` 等）
-  與驗證；`nextStep` 收窄為只看 `main`。
+- `src/model.js` 擴充 Step 欄位（`kind`、`xp`、`rewards`、`streakHistory`、
+  `archived` 等）與驗證；`nextStep` 收窄為只看帶 `goalId` 的 `main`。
 - 承接技能 `sk_<coreId>_general` 於載入時自動補齊。
+- store 從這個 PR 起就維護 `meta.inboxPeak` / `meta.reviewPeak`。高水位一旦沒記
+  就補不回來，晚做等於 PR 4 的兩條成就永遠解不開。
 - `index.html` 內嵌 script 改為透過 store 讀寫，不再直接碰 `localStorage`。
 
 驗收：
 - 帶有 legacy 資料的 App 開啟後，技能、XP、核心、任務、目標、筆記全部還在，
   數字與遷移前一致。
+- 既有任務的 `rewards[].skillId` 遷移後仍指向存在的技能（§7.2 對照表）。
+- `done: true` + `archived: true` 的任務遷移後兩種資訊都在。
+- 沒有 `goalId` 的 legacy `main` quest 不會被驗證跳過。
 - `skill-pwa-v1`、`skill-goals-v1` 仍存在且未被修改。
 - 遷移跳過的壞資料筆數有回報，不靜默吞掉。
-- 測試涵蓋：完整遷移、缺欄位、壞資料、id 碰撞、重複遷移（第二次不應再跑）。
+- 測試涵蓋：完整遷移、缺欄位、壞資料、id 碰撞、reward skillId 改寫與查無對應、
+  done+archived 並存、無 goalId 的 main、重複遷移（第二次不應再跑）。
 
 ---
 
@@ -57,7 +63,11 @@
 - 完成一個 `main` 步驟，對應技能 XP 增加、核心等級同步變動、`xpLog` 多一筆。
 - 重複完成同一個 `daily` 任務在同一天只給一次 XP。
 - 合併技能前後總 XP 不變。
-- 測試涵蓋：四種 kind 的預設值、多筆 rewards、未歸屬路徑、xpLog 上限與彙總。
+- 未歸屬的完成會寫下 `skillId: null` 的 `xpLog`；事後指定核心是更新該筆而非
+  新增一筆，總 XP 不重複計算。
+- `rollup` 紀錄能通過載入驗證，不會被當成髒資料丟棄。
+- 測試涵蓋：四種 kind 的預設值、多筆 rewards、未歸屬與事後歸屬、xpLog 上限與
+  月彙總、rollup 往返載入。
 
 ---
 
@@ -93,6 +103,8 @@
 
 驗收：
 - 成就一旦解鎖不會因資料變動被收回。
+- `inbox_zero` 與 `review_clear` 靠 `meta.inboxPeak` / `meta.reviewPeak` 判定，
+  重新載入 App 後仍解鎖得了。
 - 稱號同分時結果穩定，不會每次重繪跳動。
 - 雷達圖在 9 個核心都是 Lv1 與差距極大時都不變形。
 - 測試涵蓋：每一條成就的觸發與不觸發、稱號推導、屬性推導。

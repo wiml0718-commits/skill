@@ -107,23 +107,36 @@ storage key：`skill-rpg-v2`。所有實體都是扁平純值物件，轉換一�
   order: number, state: StepState, deferCount: number,
   xp: number, rewards: Reward[],
   streakHistory: string[], completedCount: number, lastCompletedDate: string|null,
+  archived: boolean, archivedAt: ISO|null,
   createdAt: ISO, completedAt: ISO|null }
 ```
 
 `Reward` = `{ skillId, xp }`。`StepState` 沿用現有 BuJo 符號
 （`•` 待辦、`×` 完成、`>` 順延、`<` 已排程、`–` 筆記、`~` 放棄）。
 
+**`archived` 與 `state` 正交**，不是狀態機的一個值。封存只決定「要不要顯示在
+清單裡」，不改變這件事最後是完成還是放棄。legacy 的批次封存會同時留下
+`done: true` 與 `archived: true`，把兩者壓進同一個 `state` 欄位必然弄丟其中一種
+語意（詳見 §7.2）。`archived: true` 的步驟不出現在待辦與下一步推導，但仍計入
+完成數與成就。
+
 `kind` 決定三件事，是本次收斂的核心：
 
 | kind | goalId | 參與「下一步」推導 | 完成後 | 預設 XP |
 |---|---|---|---|---|
-| `main` | 必填 | 是 | 進 `×` DONE | 50 |
+| `main` | 可為 `null` | 有 `goalId` 時參與 | 進 `×` DONE | 50 |
 | `side` | 可選 | 否 | 進 `×` DONE | 20 |
 | `daily` | 可選 | 否 | 見 §5.1 | 10 |
 | `inbox` | 必為 `null` | 否 | 進 `×` DONE | 5 |
 
-「每個目標同時只有一個下一步」這條核心規則因此收窄為：**只由 `main` 步驟推導**。
-支線與每日任務不會擋住主線，也不會被主線遮住。
+「每個目標同時只有一個下一步」這條核心規則因此收窄為：**只由帶 `goalId` 的
+`main` 步驟推導**。支線與每日任務不會擋住主線，也不會被主線遮住。
+
+**`main` 的 `goalId` 允許為 `null`。** legacy quest 沒有目標概念，遷移後既有的
+主線任務就是這個形狀（§7.2）。無目標的 `main` 步驟在任務頁以主線呈現、可正常
+完成與發放 XP，只是不參與任何目標的下一步推導。改用「遷移時建立一個承接目標」
+的做法會把原本平行的主線任務塞進「一次只露一個下一步」的規則裡藏起來，那是行為
+退化而不是遷移。回顧頁會列出這些尚未接上目標的主線任務，提示使用者指派。
 
 `inbox` 步驟被指派到某個目標時，自動轉為 `main` 並排到該目標最後（沿用現有
 `assignStep` 行為）。
@@ -131,15 +144,23 @@ storage key：`skill-rpg-v2`。所有實體都是扁平純值物件，轉換一�
 ### 3.6 xpLog
 
 ```
-{ id, date: "YYYY-MM-DD", skillId, xp: number,
-  source: "step"|"manual"|"merge", refId: string|null }
+{ id, date: "YYYY-MM-DD", skillId: string|null, xp: number,
+  source: "step"|"manual"|"merge"|"rollup", refId: string|null }
 ```
 
 XP 變動的唯一事實來源，支撐每日結算、每週回顧與成就判定。
 
+**`skillId` 可為 `null`**，代表這筆 XP 尚未歸屬到任何技能（§4.3）。未歸屬的完成
+一樣要留下紀錄，否則每日結算、每週 XP 與全域連續天數都看不到這次完成。事後指定
+核心時，是把該筆 `xpLog` 的 `skillId` 補上並同額減少 `profile.unassignedXP`，
+不新增紀錄，避免同一次完成被算兩次。
+
+`source: "rollup"` 是壓縮後的月彙總紀錄，`date` 記為該月第一天
+（`YYYY-MM-01`），`refId` 為 `null`。它必須是 `source` 正式的一員，否則載入時的
+schema 驗證會把自己寫出的彙總資料當成髒資料丟掉。
+
 **體積控制**：單筆約 100 bytes。保留最近 400 天的逐筆紀錄；更舊的資料在載入時
-壓縮成每月每技能一筆彙總（`source: "rollup"`，`refId: null`）。此上限必須在
-store 層強制執行，不能只靠 UI。
+壓縮成每月每技能一筆 rollup。此上限必須在 store 層強制執行，不能只靠 UI。
 
 ### 3.7 achievements
 
@@ -152,8 +173,13 @@ store 層強制執行，不能只靠 UI。
 ### 3.8 meta
 
 ```
-{ lastDailySummaryDate: string|null, lastWeeklyReviewDate: string|null }
+{ lastDailySummaryDate: string|null, lastWeeklyReviewDate: string|null,
+  inboxPeak: number, reviewPeak: number }
 ```
+
+`inboxPeak` / `reviewPeak` 是收件匣筆數與回顧清單項目數的歷史高水位，由 store 在
+每次資料變動後以 `max(舊值, 目前值)` 更新。它們存在的唯一理由是讓 §6.2 的歷史型
+成就可判定：「曾經有過幾筆」無法從當下快照回推。
 
 ---
 
@@ -186,6 +212,11 @@ store 層強制執行，不能只靠 UI。
 
 第 2 種情況刻意不猜測歸屬。把 XP 隨便塞進某個核心，會讓等級數字失去意義；
 明確標示「這些 XP 還沒歸屬」比默默算進去誠實。
+
+未歸屬時**仍要寫入一筆 `skillId: null` 的 `xpLog`**（§3.6）。這筆紀錄承載
+「哪一天完成了什麼」，每日結算、每週 XP 與全域連續天數都靠它；只記總額到
+`profile.unassignedXP` 會讓那次完成在時間軸上憑空消失。事後指定核心時更新該筆
+紀錄的 `skillId`，並同額減少 `unassignedXP`、增加該技能 XP。
 
 承接技能存在的理由：核心 XP 定義為「底下所有技能 XP 總和」。若允許 XP 直接掛在
 核心上，就會出現兩條計算路徑，之後每個統計都要處理兩次。統一由技能承接，公式
@@ -256,8 +287,13 @@ XP 不得為負；扣分請以修正紀錄的方式處理，不在本輪範圍�
 ### 6.2 成就
 
 判定為純函式 `evaluateAchievements(state, today) -> Set<achievementId>`，完全從
-`goals` / `steps` / `skills` / `xpLog` 推導。store 負責 diff 出新解鎖項目並寫入
-`unlockedAt`。成就一旦解鎖不會因資料變動而收回。
+`goals` / `steps` / `skills` / `xpLog` / `meta` 推導。store 負責 diff 出新解鎖項目
+並寫入 `unlockedAt`。成就一旦解鎖不會因資料變動而收回。
+
+**歷史型條件一律靠 `meta` 的高水位判定，不靠當下快照。** 「收件匣曾有 ≥5 筆」
+這種條件無法從清空後的狀態回推：逐筆清到最後只看得到 0，重新載入 App 更沒有
+記憶體可依靠。因此 `inboxPeak` / `reviewPeak`（§3.8）由 store 持續更新，成就判定
+只讀它們。沒有這兩個欄位，下表最後兩條成就永遠不會解鎖。
 
 初版成就清單（實作時以此為準，不自行增減）：
 
@@ -270,8 +306,8 @@ XP 不得為負；扣分請以修正紀錄的方式處理，不在本輪範圍�
 | `total_lv50` / `total_lv100` | 總等級達 50 / 100 |
 | `all_cores_lv5` | 9 個內建核心全部達 Lv5 |
 | `first_merge` | 首次合併技能 |
-| `inbox_zero` | 收件匣清空且當時曾有 ≥5 筆 |
-| `review_clear` | 回顧清單從 ≥3 項清到 0 |
+| `inbox_zero` | 目前收件匣為 0 筆，且 `meta.inboxPeak >= 5` |
+| `review_clear` | 目前回顧清單為 0 項，且 `meta.reviewPeak >= 3` |
 
 解鎖時以現有 toast 呈現。是否額外發系統通知列為待確認（§9）。
 
@@ -312,12 +348,31 @@ quest → step 的欄位對照：
 | `title` / `desc` | 同名 |
 | `dueDate` / `dueTime` | `due` / `dueTime` |
 | `done: true` | `state: "×"` |
-| `rewards[]` | `rewards[]` 原樣 |
-| `rewardSkillId` / `rewardXP` | 僅在 `rewards` 為空時轉為單筆 reward |
+| `rewards[]` | `rewards[]`，`skillId` 依技能 id 對照表改寫 |
+| `rewardSkillId` / `rewardXP` | 僅在 `rewards` 為空時轉為單筆 reward，`skillId` 同樣改寫 |
 | `streakHistory` / `completedCount` / `lastCompletedDate` | 同名 |
-| `archived: true` | `state: "~"` DROPPED |
-| — | `goalId: null`（quest 原本不屬於任何目標） |
+| `archived` / `archivedAt` | 同名，**不寫入 `state`** |
+| — | `goalId: null`（quest 原本不屬於任何目標，含 `main`） |
 | — | `order`：依 `createdAt` 排序後給序 |
+
+以下三點是遷移最容易出錯的地方，實作時必須逐一驗證。
+
+**技能 id 對照表必須同時套用到 rewards。** `subSkills[].id` 是數字並改寫為
+`sk_<n>`，而 `rewards[].skillId` 與 `rewardSkillId` 正是指向這些數字 id
+（`index.html:1682-1684`、`1723-1728`）。若把 rewards 原樣搬過去，既有任務的獎勵
+會全部指向不存在的技能，完成時發不出 XP，而且不會報錯，只是靜默無效。遷移必須
+先建好舊→新技能 id 對照表，再用同一份表改寫兩種 reward 格式。查不到對應技能的
+reward 直接丟棄該筆 reward（不是丟掉整個 step），並計入遷移回報。
+
+**`done` 與 `archived` 會同時為真。** `archiveAllDone`（`index.html:1809-1816`）
+會把所有已完成任務標成 `archived: true` 而保留 `done: true`。因此不能把兩者映射
+到互斥的 `state` 值：選 `~` 會把完成誤記成放棄、破壞完成數與成就，選 `×` 則遺失
+封存語意。v2 用獨立的 `archived` 欄位承接（§3.5），`state` 只由 `done` 決定。
+
+**legacy `main` quest 沒有 `goalId`。** `saveQuest`（`index.html:1726-1730`）建立
+的 quest 不含任何目標欄位，所以遷移後的 `main` 步驟 `goalId` 為 `null`。這正是
+§3.5 允許 `main` 的 `goalId` 為 `null` 的原因；若沿用「`main` 必須有 goalId」的
+寫法，這些既有主線任務會在載入驗證時被當成壞資料整批跳過。
 
 **id 前綴是必要的**：legacy quest id 與 subSkill id 都是 `Date.now()` 產生的
 數字，同一毫秒建立就會碰撞，且與 Goal/Step 層的 `s_*` id 空間混在一起。
