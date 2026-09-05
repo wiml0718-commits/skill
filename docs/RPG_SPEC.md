@@ -80,10 +80,18 @@ storage key：`skill-rpg-v2`。所有實體都是扁平純值物件，轉換一�
 
 ```
 { id, coreId, name, type: "active"|"passive", icon, desc, source,
-  xp: number, notes: Note[], mergedFrom: string[]|null, createdAt: ISO }
+  xp: number, notes: Note[], mergedFrom: string[]|null,
+  builtin: boolean, createdAt: ISO|null }
 ```
 
 `Note` = `{ id, text, date }`。
+
+`builtin` 是正式欄位，不是外掛標記。一般技能與所有遷移進來的技能都是 `false`，
+只有承接技能是 `true`。若把它留在 schema 外，normalizer 一過就會被抹掉，刪除
+流程再也分不出承接技能與一般技能。
+
+`createdAt` 可為 `null`：legacy `subSkills` 沒有這個欄位，遷移時沒有真實來源。
+填入遷移當下的時間會是編造的建立時間，寧可留 `null`。
 
 `mergedFrom` 記錄合併技能的來源技能 id，取代目前只把合併紀錄塞進 notes 第一則
 的做法；合併紀錄仍保留在 notes，但來源關係改為結構化欄位。
@@ -231,8 +239,14 @@ XP 不得為負；扣分請以修正紀錄的方式處理，不在本輪範圍�
 
 ### 4.5 合併技能
 
-合併時來源技能的 XP 相加轉入新技能，並寫入一筆 `source: "merge"` 的 `xpLog`，
-總 XP 不變。這確保「合併不會平白產生或蒸發等級」。
+合併時來源技能的 XP 相加轉入新技能，總 XP 不變。這確保「合併不會平白產生或
+蒸發等級」。
+
+合併會寫入一筆 `source: "merge"` 的 `xpLog` 作為軌跡，但**該筆的 `xp` 必須為
+`0`**，且 §5.2 的全域連續天數與 §5.3 / §5.4 的 XP 加總**一律排除
+`source: "merge"`**。合併只是搬移既有 XP，若把新技能收到的總額寫進這筆紀錄，
+直接加總 `xpLog` 的每日與每週成果就會把整批舊 XP 當成當天新得，數字瞬間膨脹。
+兩道防線都要有：金額為零讓誤加總也無害，統計排除讓實作寫錯金額時仍然正確。
 
 ---
 
@@ -374,14 +388,65 @@ reward 直接丟棄該筆 reward（不是丟掉整個 step），並計入遷移�
 §3.5 允許 `main` 的 `goalId` 為 `null` 的原因；若沿用「`main` 必須有 goalId」的
 寫法，這些既有主線任務會在載入驗證時被當成壞資料整批跳過。
 
-**id 前綴是必要的**：legacy quest id 與 subSkill id 都是 `Date.now()` 產生的
-數字，同一毫秒建立就會碰撞，且與 Goal/Step 層的 `s_*` id 空間混在一起。
-前綴 `q_` / `sk_` 同時解決碰撞與 `model.js` 的 `ID_PATTERN` 相容性。
+**id 前綴解決的是命名空間，不是碰撞。** legacy quest id 與 subSkill id 都是
+`Date.now()` 產生的數字，與 Goal/Step 層的 `s_*` id 空間混在一起，因此需要
+`q_` / `sk_` 前綴來隔離，同時滿足 `model.js` 的 `ID_PATTERN`。
+
+但前綴無法處理**同類之間**的碰撞：兩筆 quest 若帶著相同的數字 id（同毫秒建立，
+或匯入的備份檔本身就重複），加了前綴仍然都是 `q_<n>`，去重時會靜默丟掉其中一筆，
+reward 對照也會指向錯的技能。因此遷移必須：
+
+1. 依序處理每一筆，遇到已用過的目標 id 就改為 `q_<n>_2`、`q_<n>_3`，直到唯一。
+2. 把「舊 id + 型別 + 出現序」到新 id 的對應寫進遷移期間的對照表，reward 與
+   `goalId` 等所有引用一律查表改寫，不得各自重算。
+3. 產生過後綴的筆數計入遷移回報。
+
+去重只能用在真正的重複資料上，不能拿來掩蓋 id 生成不唯一。
 
 遷移不追溯產生 `xpLog`：既有 XP 直接落在 `skills[].xp` 上作為起始值，
 `xpLog` 從遷移日起算。歷史逐筆紀錄已經不存在，硬造出來就是假資料。
 
-### 7.3 匯出 / 匯入
+### 7.3 新欄位的預設值
+
+上面的對照表只講「舊欄位搬到哪」。但 v2 有一批欄位在 legacy 資料裡根本不存在
+（`index.html:361-385` 的 cores 沒有 `order` 與 `builtin`，subSkills 沒有
+`createdAt` 與 `mergedFrom`，Goal/Step 層也沒有本規格新增的多數 Step 欄位）。
+PR 1 要依 v2 模型驗證，所以每一個新欄位都必須有明定的預設值，否則一般備份就會
+產生非法紀錄，嚴格 sanitize 時整批消失。
+
+| 實體 | 欄位 | 遷移時的值 |
+|---|---|---|
+| profile | `schemaVersion` | `2` |
+| profile | `createdAt` | 遷移執行時間 |
+| profile | `unassignedXP` | `0` |
+| cores | `order` | 依來源陣列的索引，從 `0` 起 |
+| cores | `builtin` | id 屬於 9 個內建核心則 `true`，否則 `false` |
+| skills | `builtin` | `false`（承接技能由 store 另行建立，`true`） |
+| skills | `mergedFrom` | `null` |
+| skills | `createdAt` | `null`（無真實來源，不編造） |
+| skills | `desc` / `icon` / `source` | 缺漏時為空字串 |
+| skills | `notes` | 缺漏時為 `[]` |
+| goals | `coreId` | `null` |
+| steps | `xp` | 依 `kind` 的預設值（§3.5） |
+| steps | `rewards` | quest 帶入，Goal/Step 來源為 `[]` |
+| steps | `deferCount` | 沿用既有值，缺漏為 `0` |
+| steps | `streakHistory` | `daily` 沿用既有值，其餘為 `[]` |
+| steps | `completedCount` | 沿用既有值，缺漏為 `0` |
+| steps | `lastCompletedDate` | 沿用既有值，缺漏為 `null` |
+| steps | `archived` / `archivedAt` | quest 沿用既有值；Goal/Step 來源為 `false` / `null` |
+| steps | `desc` / `dueTime` | 缺漏時為空字串 / `null` |
+| steps | `createdAt` | quest 沿用既有值；Goal/Step 來源為 `null` |
+| steps | `completedAt` | 沿用既有值，缺漏為 `null`（**不以遷移時間頂替**） |
+| xpLog | 全部 | `[]`（§7.2 末段：不追溯造紀錄） |
+| achievements | 全部 | `[]`，遷移後第一次判定即可解鎖既有成績 |
+| meta | `lastDailySummaryDate` / `lastWeeklyReviewDate` | `null` |
+| meta | `inboxPeak` / `reviewPeak` | 遷移完成後的當下值 |
+
+兩個原則貫穿整張表：**缺欄位補中性值，缺時間點補 `null`**。把遷移時間填進
+`createdAt` 或 `completedAt` 會產生看起來合理、實際上是編造的歷史，之後所有
+以時間為軸的統計都會被這批假時間污染，而且再也分不出哪些是真的。
+
+### 7.4 匯出 / 匯入
 
 匯出格式升級為 v2 單一檔案（含 `profile` / `cores` / `skills` / `goals` /
 `steps` / `xpLog` / `achievements` / `meta`）。匯入時同時接受 v1 格式，走與

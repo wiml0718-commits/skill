@@ -42,8 +42,11 @@
 - 沒有 `goalId` 的 legacy `main` quest 不會被驗證跳過。
 - `skill-pwa-v1`、`skill-goals-v1` 仍存在且未被修改。
 - 遷移跳過的壞資料筆數有回報，不靜默吞掉。
-- 測試涵蓋：完整遷移、缺欄位、壞資料、id 碰撞、reward skillId 改寫與查無對應、
-  done+archived 並存、無 goalId 的 main、重複遷移（第二次不應再跑）。
+- 一般備份（欠缺 v2 新欄位）遷移後全部通過模型驗證，不會被 sanitize 整批丟掉。
+- 同類 legacy id 重複時每筆都拿到唯一新 id，沒有任何一筆被去重吃掉。
+- 測試涵蓋：完整遷移、缺欄位（§7.3 每個預設值）、壞資料、同類 id 重複、
+  reward skillId 改寫與查無對應、done+archived 並存、無 goalId 的 main、
+  重複遷移（第二次不應再跑）。
 
 ---
 
@@ -66,6 +69,8 @@
 - 未歸屬的完成會寫下 `skillId: null` 的 `xpLog`；事後指定核心是更新該筆而非
   新增一筆，總 XP 不重複計算。
 - `rollup` 紀錄能通過載入驗證，不會被當成髒資料丟棄。
+- 合併技能寫下的 `xpLog` 金額為 `0`，且每日 / 每週 XP 加總排除 `source: "merge"`，
+  合併當天的成果數字不因合併而膨脹。
 - 測試涵蓋：四種 kind 的預設值、多筆 rewards、未歸屬與事後歸屬、xpLog 上限與
   月彙總、rollup 往返載入。
 
