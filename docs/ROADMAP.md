@@ -81,7 +81,8 @@
   新增一筆，總 XP 不重複計算。
 - `rollup` 紀錄能通過載入驗證，不會被當成髒資料丟棄。
 - `skillId: null` 的紀錄超過 400 天仍不被壓成 rollup，逐筆待歸屬清單不失真。
-- `meta.activeDays` 隨每次非 merge 的 XP 發放更新，補登併入被補登的日期。
+- `meta.activeDays` 只隨 `step` / `manual` 兩種來源更新（`merge` 與 `rollup` 不
+  併入），補登併入被補登的日期。
 - 合併技能寫下的 `xpLog` 金額為 `0`，且每日 / 每週 XP 加總排除 `source: "merge"`，
   合併當天的成果數字不因合併而膨脹。
 - 把技能 XP 調低會寫下負數的 manual 紀錄，`xpLog` 加總仍等於目前 XP；扣減量超過
