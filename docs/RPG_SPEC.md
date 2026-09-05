@@ -38,7 +38,7 @@ legacy 的 `state.quests` 做到期提醒，除此之外沒有任何資料流。
    線下練習用。
 3. **兩個「任務」概念收斂成一個**：Step 為唯一實體，legacy quest 的 main / side /
    daily 降為 Step 的 `kind` 屬性。
-4. **屬性與成就**：不新增屬性維度，直接以現有 9 大核心的等級作為角色屬性，
+4. **屬性與成就**：不新增屬性維度，直接以現有核心技能的等級作為角色屬性，
    新增角色卡、雷達圖、稱號與成就徽章。
 5. **節奏與回顧**：強化連續天數、新增每日結算與每週回顧，並與現有 review
    （反覆順延、長期逾期、停滯目標）整合成同一頁。
@@ -74,7 +74,15 @@ storage key：`skill-rpg-v2`。所有實體都是扁平純值物件，轉換一�
 
 9 個內建核心（`body` / `emotion` / `time` / `think` / `learn` / `comm` /
 `social` / `finance` / `lead`）沿用現有定義與配色。使用者自訂核心 id 前綴
-`core_`，`builtin: false`，可刪除；內建核心不可刪除，只能改名與換色。
+`core_`，`builtin: false`。
+
+**`builtin` 只標示「隨 App 內建」，不代表不可刪除。** 現行 `deleteCore`
+（`index.html:1183-1199`）對內建核心沒有任何保護，刪除時連同其底下的技能一併移除，
+既有使用者的資料因此可能只有 5 個核心。v2 沿用這個行為，不在遷移時把使用者刪掉的
+核心補回來——那是推翻使用者已經做過的決定。
+
+因此**核心數量是變動的**，可能少於 9（刪過），也可能多於 9（自訂）。§4.1 的總等級
+與 §6.1 的雷達圖都必須依目前實際核心數計算，不得寫死 9。
 
 ### 3.3 skills（子技能）
 
@@ -97,7 +105,7 @@ storage key：`skill-rpg-v2`。所有實體都是扁平純值物件，轉換一�
 的做法；合併紀錄仍保留在 notes，但來源關係改為結構化欄位。
 
 **每個核心自動擁有一個承接技能** `sk_<coreId>_general`（顯示名「歷練」），
-`builtin: true`、不可刪除。它存在的唯一理由見 §4.3。
+`builtin: true`，不可單獨刪除，但會隨其核心一併移除。它存在的唯一理由見 §4.3。
 
 ### 3.4 goals
 
@@ -187,8 +195,10 @@ XP 來自哪個步驟，同月的多筆也無法分派到不同核心。歸屬�
 
 ```
 { lastDailySummaryDate: string|null, lastWeeklyReviewDate: string|null,
-  inboxPeak: number, reviewPeak: number }
+  inboxPeak: number, reviewPeak: number, activeDays: string[] }
 ```
+
+`activeDays` 是有活動的日期（升序、去重），全域連續天數由它推導，理由見 §5.2。
 
 `inboxPeak` / `reviewPeak` 是收件匣筆數與回顧清單項目數的歷史高水位，由 store 在
 每次資料變動後以 `max(舊值, 目前值)` 更新。它們存在的唯一理由是讓 §6.2 的歷史型
@@ -201,7 +211,9 @@ XP 來自哪個步驟，同月的多筆也無法分派到不同核心。歸屬�
 ### 4.1 等級曲線
 
 沿用現有規則，不修改：`LEVEL_XP[i] = 50i² + 50i`，`Lv1–99`，核心 XP 為其底下
-所有技能 XP 總和，總等級為 9 個核心等級相加。
+所有技能 XP 總和。
+
+**總等級 = 目前所有核心的等級相加**，含使用者自訂核心，不假設剛好 9 個（§3.2）。
 
 沿用現有 `LV_NAMES` 階層名（初學者 → 見習生 → … → 神域）。
 
@@ -273,8 +285,15 @@ XP 不得為負；扣分請以修正紀錄的方式處理，不在本輪範圍�
 
 ### 5.2 全域連續天數
 
-`xpLog` 中有任何紀錄的連續天數，代表「連續多少天有推進任何事」。與單一每日任務
-的 streak 分開顯示。
+「連續多少天有推進任何事」。與單一每日任務的 streak 分開顯示。
+
+**由 `meta.activeDays` 推導，不由 `xpLog` 推導。** store 在寫入任何 `source` 不是
+`merge` 的 `xpLog` 時，同步把該筆的 `date` 併入 `activeDays`（升序、去重）。補登
+併入的是被補登的那一天，與 §5.1 一致。
+
+不能從 `xpLog` 算，是因為 §3.6 的月彙總會把 400 天前的逐日紀錄壓成月初一筆，月內
+其他日期就此消失，仍在持續中的長 streak 會在 400 天附近被截斷或算錯。`activeDays`
+每天只佔一個日期字串，十年不到 40 KB，因此不做壓縮。
 
 ### 5.3 每日結算
 
@@ -297,8 +316,9 @@ XP 不得為負；扣分請以修正紀錄的方式處理，不在本輪範圍�
 
 ### 6.1 角色卡
 
-- **屬性 = 9 大核心等級**，不新增維度。
-- 九邊形雷達圖，以 inline SVG 繪製（維持零建置，不引入圖表函式庫）。
+- **屬性 = 核心等級**，不新增維度。
+- 雷達圖為 N 邊形，N 等於目前的核心數（§3.2：可能少於或多於 9）。以 inline SVG
+  繪製，維持零建置，不引入圖表函式庫。N < 3 無法構成多邊形，改用長條列表呈現。
 - **角色稱號** = 等級最高核心的階層名 + 核心名，例如「學習能力・宗師」。
   同分時取 `cores` 的 `order` 較前者，讓結果穩定不跳動。
 - 總等級、總 XP、全域連續天數、已解鎖成就數。
@@ -323,14 +343,19 @@ XP 不得為負；扣分請以修正紀錄的方式處理，不在本輪範圍�
 | `streak_7` / `streak_30` | 任一每日任務連續 7 / 30 天 |
 | `core_lv10` / `core_lv25` / `core_lv50` | 任一核心達 Lv10 / 25 / 50 |
 | `total_lv50` / `total_lv100` | 總等級達 50 / 100 |
-| `all_cores_lv5` | 9 個內建核心全部達 Lv5 |
-| `first_merge` | 首次合併技能 |
+| `all_cores_lv5` | 目前所有核心（含自訂）皆達 Lv5，且核心數 ≥ 5 |
+| `first_merge` | 存在任一技能 `mergedFrom !== null` |
 | `inbox_zero` | 收件匣待處理數為 0，且 `meta.inboxPeak >= 5` |
 | `review_clear` | 目前回顧清單為 0 項，且 `meta.reviewPeak >= 3` |
 
-**收件匣待處理數的定義**：`kind === "inbox"`、`archived !== true`，且 `state` 不是
-`×` DONE 也不是 `~` DROPPED。`meta.inboxPeak` 與 `inbox_zero` 必須用同一個
-predicate，實作時共用同一個函式。
+**收件匣待處理數的定義**：`kind === "inbox"`、`archived !== true`，且
+`isActionable(state)` 為真（即 `•` TODO、`<` SCHEDULED、`>` DEFERRED 三種）。
+`meta.inboxPeak` 與 `inbox_zero` 必須用同一個 predicate，實作時共用同一個函式。
+
+用 `isActionable` 而不是「排除完成與放棄」，是為了跟現有模型一致：`model.js` 把
+`–` NOTE 與完成、放棄同樣視為不可行動的終點，`goalProgress` 也把筆記排除在
+remaining 之外。若只排除完成與放棄，使用者把五筆收件匣項目整理成筆記之後，畫面上
+待辦已清空，`inbox_zero` 卻還是解不開。
 
 現有 `inboxSteps`（`src/model.js`）是「所有 `goalId` 為 null 的 step，含已完成」，
 不能直接拿來計數：inbox 完成後 `goalId` 仍是 `null`，用那個集合算，完成五筆之後
@@ -442,7 +467,7 @@ PR 1 要依 v2 模型驗證，所以每一個新欄位都必須有明定的預�
 | cores | `order` | 依來源陣列的索引，從 `0` 起 |
 | cores | `builtin` | id 屬於 9 個內建核心則 `true`，否則 `false` |
 | skills | `builtin` | `false`（承接技能由 store 另行建立，`true`） |
-| skills | `mergedFrom` | `null` |
+| skills | `mergedFrom` | notes 中有合併紀錄則 `[]`，否則 `null`（見下） |
 | skills | `createdAt` | `null`（無真實來源，不編造） |
 | skills | `desc` / `icon` / `source` | 缺漏時為空字串 |
 | skills | `notes` | 缺漏時為 `[]` |
@@ -453,7 +478,7 @@ PR 1 要依 v2 模型驗證，所以每一個新欄位都必須有明定的預�
 | steps | `streakHistory` | `daily` 沿用既有值，其餘為 `[]` |
 | steps | `completedCount` | 沿用既有值，缺漏為 `0` |
 | steps | `lastCompletedDate` | 沿用既有值，缺漏為 `null` |
-| steps | `archived` / `archivedAt` | quest 沿用既有值；Goal/Step 來源為 `false` / `null` |
+| steps | `archived` / `archivedAt` | quest 沿用既有值，**缺漏補 `false` / `null`**；Goal/Step 來源為 `false` / `null` |
 | steps | `desc` / `dueTime` | 缺漏時為空字串 / `null` |
 | steps | `createdAt` | quest 沿用既有值；Goal/Step 來源為 `null` |
 | steps | `completedAt` | 沿用既有值，缺漏為 `null`（**不以遷移時間頂替**） |
@@ -461,10 +486,24 @@ PR 1 要依 v2 模型驗證，所以每一個新欄位都必須有明定的預�
 | achievements | 全部 | `[]`，遷移後第一次判定即可解鎖既有成績 |
 | meta | `lastDailySummaryDate` / `lastWeeklyReviewDate` | `null` |
 | meta | `inboxPeak` / `reviewPeak` | 遷移完成後的當下值 |
+| meta | `activeDays` | `[]`（`xpLog` 從遷移日起算，之前沒有逐日資料） |
 
 兩個原則貫穿整張表：**缺欄位補中性值，缺時間點補 `null`**。把遷移時間填進
 `createdAt` 或 `completedAt` 會產生看起來合理、實際上是編造的歷史，之後所有
 以時間為軸的統計都會被這批假時間污染，而且再也分不出哪些是真的。
+
+「缺漏補值」對 `archived` / `archivedAt` 特別重要：`saveQuest`
+（`index.html:1726-1731`）建立的一般任務根本不會寫入這兩個欄位，只有封存過的才有。
+若照字面「沿用既有值」，絕大多數從未封存的 legacy quest 會拿到 `undefined`，在
+嚴格驗證下整批被跳過。
+
+**舊合併紀錄的辨識**：`confirmMerge`（`index.html:985-992`）只在合併後技能的 notes
+第一則留下文字紀錄，開頭固定為 `⚗ 合併自：`，沒有任何結構化欄位。遷移時掃描每個
+技能的 notes，只要有一則以這個字串開頭，就把 `mergedFrom` 設為 `[]`——空陣列代表
+「曾經合併過，但來源技能已不可考」，與從未合併的 `null` 區分。`first_merge` 因此
+改以 `mergedFrom !== null` 判定，既有使用者的合併紀錄才不會在 v2 消失。這是文字
+比對的啟發式判斷，會誤判自行輸入相同開頭的筆記，但代價只是一個成就早解鎖，
+且這是舊資料裡唯一存在的訊號。
 
 ### 7.4 匯出 / 匯入
 
