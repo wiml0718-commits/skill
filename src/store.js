@@ -63,16 +63,30 @@ function parse(text){
 
 // backend.getItem 本身可能丟例外（受限的隱私 / 儲存環境）。讓它往上冒會使
 // install() 在掛上 window.Goals 之前就中斷，整個 app 停在載入中的提示畫面。
+//
+// 但「讀不到」和「沒有資料」必須分得出來：把例外一律當成 null，load() 會以為
+// 什麼都沒有，接著把預設值寫回去，直接蓋掉讀不到但其實還在的資料。
 function read(backend, key){
-  try{ return backend.getItem(key); }catch{ return null; }
+  try{ return {ok: true, text: backend.getItem(key)}; }
+  catch{ return {ok: false, text: null}; }
 }
 
 // 壞掉的單筆資料就丟掉，不讓整包資料因為一筆髒資料而全滅。
 // 但跳過的筆數要能回報出去——靜默的資料遺失是察覺不到的（§7.1）。
+// v2 應該有的區段。整段缺席時 sanitize 會安靜地補上預設值或空陣列，
+// 匯入一份被截斷的備份就會把現有的目標與步驟清掉還回報成功，所以要計入損失。
+const V2_ARRAYS = ["cores", "skills", "goals", "steps", "xpLog", "achievements"];
+const V2_OBJECTS = ["profile", "meta"];
+
 function sanitize(raw){
   const data = emptyData();
   const report = emptyReport();
   if(!raw || typeof raw !== "object") return {data, report};
+
+  for(const k of V2_ARRAYS) if(!Array.isArray(raw[k])) report.missingSections += 1;
+  for(const k of V2_OBJECTS){
+    if(!raw[k] || typeof raw[k] !== "object") report.missingSections += 1;
+  }
 
   try{ data.profile = model.createProfile(raw.profile || {}); }catch{ /* 用預設 */ }
   try{ data.meta = model.createMeta(raw.meta || {}); }catch{ /* 用預設 */ }
@@ -256,8 +270,12 @@ export function createStore(backend = defaultBackend()){
   let report = emptyReport();
   let migrated = false;
   let fresh = false;
+  // 儲存讀不到時進入唯讀模式：資料只留在記憶體，一律不寫回去。
+  let degraded = false;
 
   function persist(){
+    // 讀不到就不寫。這一輪的記憶體狀態不是使用者真正的資料，寫回去等於銷毀。
+    if(degraded) return;
     try{
       backend.setItem(STORAGE_KEY, JSON.stringify(data));
     }catch{ /* 配額滿或無法寫入時保持記憶體狀態，不讓 UI 崩掉 */ }
@@ -291,7 +309,19 @@ export function createStore(backend = defaultBackend()){
   const store = {
     // 載入：v2 存在就直接用；不存在才跑一次遷移，並且不刪任何舊資料（§7.1）。
     load(){
-      const existing = parse(read(backend, STORAGE_KEY));
+      const primary = read(backend, STORAGE_KEY);
+      if(!primary.ok){
+        // 讀不到就什麼都不寫。使用者的資料可能還在，只是這次拿不到；
+        // 用預設值覆蓋過去會讓「暫時讀不到」變成「永久沒有了」。
+        data = emptyData();
+        report = emptyReport();
+        migrated = false;
+        fresh = false;
+        degraded = true;
+        ensureGeneralSkills(data);
+        return store.getState();
+      }
+      const existing = parse(primary.text);
       if(existing){
         const out = sanitize(existing);
         data = out.data;
@@ -299,8 +329,8 @@ export function createStore(backend = defaultBackend()){
         migrated = false;
         fresh = false;
       }else{
-        const pwa = parse(read(backend, LEGACY_PWA_KEY));
-        const goals = parse(read(backend, LEGACY_GOALS_KEY));
+        const pwa = parse(read(backend, LEGACY_PWA_KEY).text);
+        const goals = parse(read(backend, LEGACY_GOALS_KEY).text);
         const out = migrateV1({pwa, goals});
         data = out.data;
         report = out.report;
@@ -309,7 +339,7 @@ export function createStore(backend = defaultBackend()){
         // 否則刪光技能之後重開，預設技能會自己長回來。
         fresh = !migrated;
         // 轉換前先留一份原樣快照，已存在則不覆寫
-        if(migrated && !read(backend, BACKUP_KEY)){
+        if(migrated && !read(backend, BACKUP_KEY).text){
           try{
             backend.setItem(BACKUP_KEY, JSON.stringify({
               savedAt: new Date().toISOString(),
@@ -325,7 +355,7 @@ export function createStore(backend = defaultBackend()){
 
     // 遷移或載入時跳過了哪些資料。呼叫端負責讓使用者看得到。
     migrationReport(){
-      return {...report, total: reportTotal(report), migrated, fresh};
+      return {...report, total: reportTotal(report), migrated, fresh, degraded};
     },
 
     // 對外一律回傳複本，避免呼叫端繞過 store 直接改到內部陣列

@@ -391,15 +391,26 @@ let state = {charName:"冒險者", subSkills:[], quests:[], cores:[...CORES]};
 function loadState(){
   state=window.Goals.legacyState();
 }
-let saveTimer;
+let saveTimer=null;
+function writeState(){
+  // Always persist current CORES state
+  if(!state.cores)state.cores=[...CORES];
+  try{window.Goals.saveLegacyState(state);}catch{}
+}
 function saveState(silent=false){
   clearTimeout(saveTimer);
   saveTimer=setTimeout(()=>{
-    // Always persist current CORES state
-    if(!state.cores)state.cores=[...CORES];
-    try{window.Goals.saveLegacyState(state);}catch{}
+    saveTimer=null;
+    writeState();
     if(!silent)showToast("✓ 已儲存");
   },600);
+}
+// 把還在等 debounce 的編輯立刻寫進 store。匯出時一定要先做，否則剛改完名字
+// 就按匯出，備份裡會少掉那筆已經回報「已儲存」的變更。
+function flushState(){
+  if(saveTimer===null)return;
+  clearTimeout(saveTimer);saveTimer=null;
+  writeState();
 }
 function showToast(msg,duration=1800){
   const t=document.getElementById("toast");
@@ -771,6 +782,7 @@ function exportData(){
     alert("資料模組尚未載入，無法匯出。\n（以 file:// 直接開啟時模組無法載入，請改用網址開啟）");
     return;
   }
+  flushState();
   // 所有資料現在都在同一份 schema v2 裡，匯出就是它本身
   const payload=window.Goals.exportPayload();
   const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});
@@ -1866,6 +1878,11 @@ function boot(){
   loadState();
   if(state.cores)syncCores();
   const r=window.Goals.migrationReport();
+  if(r.degraded){
+    alert("讀不到瀏覽器儲存空間，這次開啟看到的是空白資料。\n"+
+          "你原本的資料很可能還在，只是這次拿不到，因此這個工作階段不會寫入任何東西。\n\n"+
+          "請關掉無痕／隱私模式或解除網站資料限制後再開一次。");
+  }
   // 只有全新安裝才給預設技能，而且立刻落地。若改用「技能是空的就補預設」，
   // 使用者把技能全部刪光之後重開，這批預設會自己長回來。
   if(r.fresh&&!state.subSkills.length){

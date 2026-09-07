@@ -25,6 +25,8 @@ export function emptyReport(){
     droppedRewards: 0,
     suffixedIds: 0,
     orphanSkills: 0,
+    // v2 備份整段不見（例如被截斷的檔案）也是損失，只是損失的是一整區而不是幾筆
+    missingSections: 0,
   };
 }
 
@@ -32,7 +34,8 @@ export function emptyReport(){
 // 對使用者的意義一樣：資料進不來了。
 export function reportTotal(report){
   return report.skippedCores + report.skippedSkills + report.skippedQuests
-       + report.skippedGoals + report.skippedSteps + report.droppedRewards;
+       + report.skippedGoals + report.skippedSteps + report.droppedRewards
+       + report.missingSections;
 }
 
 // 前綴解決的是命名空間，不是碰撞：兩筆 quest 帶著相同數字 id 時，加了前綴仍然

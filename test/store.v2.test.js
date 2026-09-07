@@ -297,3 +297,50 @@ test("乾淨的備份試算為 0，不會多問一次", () => {
   store.load();
   assert.equal(store.inspect(src.toJSON()).total, 0);
 });
+
+test("讀不到儲存時不會把預設值寫回去蓋掉使用者的資料", () => {
+  // getItem 丟例外但 setItem 正常：把例外當成「沒有資料」再 commit，
+  // 等於用一份空白預設覆蓋掉其實還在的資料。
+  const written = [];
+  const store = createStore({
+    getItem: () => {throw new Error("SecurityError");},
+    setItem: (k, v) => {written.push(k);},
+  });
+  const state = store.load();
+  assert.equal(store.migrationReport().degraded, true);
+  assert.deepEqual(written, [], "一個字都不能寫");
+  assert.equal(state.cores.length, 9, "記憶體裡仍要有可用的空白狀態");
+});
+
+test("唯讀模式下之後的編輯也不會落地", () => {
+  const written = [];
+  const store = createStore({
+    getItem: () => {throw new Error("SecurityError");},
+    setItem: k => {written.push(k);},
+  });
+  store.load();
+  store.addGoal({title: "這次不該被寫進去"});
+  store.addStep({title: "隨手記"});
+  assert.deepEqual(written, []);
+});
+
+test("被截斷的 v2 備份會被算成損失，不會靜默清掉現有資料", () => {
+  const store = createStore(backend({[LEGACY_PWA_KEY]: PWA, [LEGACY_GOALS_KEY]: GOALS}));
+  store.load();
+  // 只剩 cores 與 skills 的備份仍會通過 index.html 的格式檢查
+  const truncated = {version: 2, cores: [], skills: []};
+  const preview = store.inspect(truncated);
+  // profile / goals / steps / xpLog / achievements / meta 共六段不見
+  assert.equal(preview.missingSections, 6);
+  assert.ok(preview.total >= 6, "試算不能回報 0，否則不會跳確認就把目標清光");
+});
+
+test("完整的 v2 備份不會被誤判成有缺", () => {
+  const src = createStore(backend({[LEGACY_PWA_KEY]: PWA}));
+  src.load();
+  const store = createStore(backend());
+  store.load();
+  const preview = store.inspect(src.toJSON());
+  assert.equal(preview.missingSections, 0);
+  assert.equal(preview.total, 0);
+});
