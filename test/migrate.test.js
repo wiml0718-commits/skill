@@ -281,3 +281,15 @@ test("指向不存在目標的步驟仍退回收件匣", () => {
   assert.equal(step.goalId, null);
   assert.equal(step.kind, "inbox");
 });
+
+test("重複的 legacy 核心 id 兩筆都留下，技能仍指向第一筆", () => {
+  const out = migrateV1({pwa: {
+    cores: [{id: "body", name: "身體"}, {id: "body", name: "另一個身體"}],
+    subSkills: [{id: 1, coreId: "body", name: "重訓", type: "active", xp: 10}],
+  }});
+  assert.deepEqual(out.data.cores.map(c => c.id), ["body", "body_2"]);
+  assert.deepEqual(out.data.cores.map(c => c.name), ["身體", "另一個身體"]);
+  assert.equal(out.data.skills[0].coreId, "body", "first-match，與 legacy find() 一致");
+  assert.equal(out.report.skippedCores, 0, "沒有任何一筆被去重吃掉");
+  assert.equal(out.report.suffixedIds >= 1, true);
+});

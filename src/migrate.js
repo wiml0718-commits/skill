@@ -90,28 +90,37 @@ export function hasMergeNote(notes){
 
 // ── cores ────────────────────────────────────────────────────────────────────
 // 使用者刪掉的內建核心不補回來：那是推翻他已經做過的決定（§3.2）。
+// 回傳 {cores, refMap}。舊 id 重複時逐筆讓開而不是丟掉第二筆：那筆有自己的
+// 名稱與圖示，去重會讓它連同底下技能的歸屬一起消失，而且不計入任何損失。
+// refMap 與 skill / quest 同樣採 first-match，對應 legacy find() 的語意（§7.2）。
 function migrateCores(raw, report){
   // 空陣列代表使用者把核心全刪了，那是他做過的決定；只有欄位根本不存在
   // （或不是陣列）才回到內建預設。
   const source = Array.isArray(raw) ? raw : model.BUILTIN_CORES;
   const cores = [];
+  const refMap = new Map();
   const used = new Set();
   source.forEach((c, i) => {
+    const oldKey = String(c?.id ?? "");
+    // 本來就沒有 id 的核心交給 createCore 擋下來，不在這裡替它發明一個。
+    const id = oldKey === "" ? "" : uniqueId(oldKey, used, report);
     try{
-      const core = model.createCore({...c, order: i});
-      if(used.has(core.id)) return;
-      used.add(core.id);
+      const core = model.createCore({...c, ...(id ? {id} : {}), order: i});
       cores.push(core);
-    }catch{ report.skippedCores += 1; }
+      if(oldKey !== "" && !refMap.has(oldKey)) refMap.set(oldKey, core.id);
+    }catch{
+      if(id) used.delete(id);
+      report.skippedCores += 1;
+    }
   });
-  return cores;
+  return {cores, refMap};
 }
 
 // ── skills ───────────────────────────────────────────────────────────────────
 // 回傳 {skills, refMap}。refMap 是「舊 id → 該型別第一筆的新 id」，reward 一律
 // 查這一份：reward 只帶舊數字 id，沒有出現序可用，而 legacy 的 find() 語意本來
 // 就是「指向第一筆」（§7.2）。
-function migrateSkills(raw, coreIds, report){
+function migrateSkills(raw, coreIds, coreRefMap, report){
   const skills = [];
   const refMap = new Map();
   const used = new Set();
@@ -124,6 +133,8 @@ function migrateSkills(raw, coreIds, report){
       const skill = model.createSkill({
         ...s,
         id,
+        // 核心 id 重複時後綴筆是新 id，技能仍指向第一筆（舊版 find() 的行為）
+        coreId: coreRefMap.get(String(s.coreId ?? "")) ?? s.coreId,
         notes: normalizeLegacyNotes(s.notes),
         mergedFrom: hasMergeNote(s.notes) ? [] : null,
         builtin: false,
@@ -265,9 +276,9 @@ export function migrateV1({pwa = null, goals = null, now = new Date()} = {}){
   const src = pwa && typeof pwa === "object" ? pwa : {};
   const gsrc = goals && typeof goals === "object" ? goals : {};
 
-  const cores = migrateCores(src.cores, report);
+  const {cores, refMap: coreRefMap} = migrateCores(src.cores, report);
   const coreIds = new Set(cores.map(c => c.id));
-  const {skills, refMap} = migrateSkills(src.subSkills, coreIds, report);
+  const {skills, refMap} = migrateSkills(src.subSkills, coreIds, coreRefMap, report);
 
   const usedStepIds = new Set();
   const questSteps = migrateQuests(src.quests, refMap, usedStepIds, report);

@@ -1893,6 +1893,10 @@ function boot(){
     showToast(r.total>0
       ?`✓ 資料已升級（${r.total} 項資料無法完整轉入）`
       :"✓ 資料已升級",r.total>0?4000:2000);
+  }else if(r.total>0){
+    // 一般開啟時讀到壞掉的紀錄同樣要講。不講的話，使用者只會看到東西少了，
+    // 卻不知道發生過什麼、也不知道原始資料還留著一份副本。
+    showToast(`⚠ ${r.total} 項資料讀不進來，原始資料已另存一份備份`,4000);
   }
   checkOverdue();
   render();

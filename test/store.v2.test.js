@@ -1,7 +1,7 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
-import {createStore, STORAGE_KEY, LEGACY_PWA_KEY, LEGACY_GOALS_KEY, BACKUP_KEY}
-  from "../src/store.js";
+import {createStore, STORAGE_KEY, LEGACY_PWA_KEY, LEGACY_GOALS_KEY, BACKUP_KEY,
+        DAMAGED_KEY} from "../src/store.js";
 import * as m from "../src/model.js";
 
 function backend(seed = {}){
@@ -424,4 +424,66 @@ test("壞掉的 XP 紀錄與成就紀錄會計入損失，不會被靜默丟掉"
   assert.equal(preview.skippedXpLog, 1);
   assert.equal(preview.skippedAchievements, 1);
   assert.equal(preview.total, 2, "匯入前的確認必須看得到這兩筆");
+});
+
+test("既有 v2 含壞資料時，覆寫前先留一份原樣快照", () => {
+  const damaged = {
+    version: 2,
+    profile: {}, cores: [], skills: [], goals: [], steps: [],
+    xpLog: [{id: "x1", date: "不是日期", skillId: null, xp: 5, source: "step"}],
+    achievements: [], meta: {},
+  };
+  const be = backend({[STORAGE_KEY]: damaged});
+  const store = createStore(be);
+  store.load();
+
+  const r = store.migrationReport();
+  assert.equal(r.migrated, false);
+  assert.equal(r.total, 1, "一般載入丟掉的紀錄同樣要回報");
+  // 落地的是丟過的版本，但原始那份還在，還救得回來
+  assert.equal(be.raw(STORAGE_KEY).xpLog.length, 0);
+  assert.deepEqual(be.raw(DAMAGED_KEY), damaged);
+});
+
+test("原樣快照已存在時不覆寫，也不會每次開啟都重寫一次", () => {
+  const older = {version: 2, note: "先前那份"};
+  const be = backend({
+    [STORAGE_KEY]: {version: 2, profile: {}, cores: [], skills: [], goals: [],
+                    steps: [], xpLog: [{id: "x1", date: "壞", skillId: null, xp: 1, source: "step"}],
+                    achievements: [], meta: {}},
+    [DAMAGED_KEY]: older,
+  });
+  createStore(be).load();
+  assert.deepEqual(be.raw(DAMAGED_KEY), older);
+});
+
+test("乾淨的 v2 不會留下快照", () => {
+  const be = backend({[STORAGE_KEY]: {
+    version: 2, profile: {}, cores: [], skills: [], goals: [], steps: [],
+    xpLog: [], achievements: [], meta: {},
+  }});
+  createStore(be).load();
+  assert.equal(be.has(DAMAGED_KEY), false);
+});
+
+test("壞掉的 profile / meta 會計入損失，不會安靜地換成預設值", () => {
+  const store = createStore(backend());
+  store.load();
+  const preview = store.inspect({
+    version: 2,
+    profile: {charName: "阿維", createdAt: "不是時間", unassignedXP: 30},
+    cores: [], skills: [], goals: [], steps: [], xpLog: [], achievements: [],
+    meta: {lastDailySummaryDate: "不是日期", inboxPeak: 12},
+  });
+  assert.equal(preview.total >= 2, true, "兩個區段被換掉都要看得見");
+});
+
+test("只用過目標頁的使用者升級後仍拿得到預設技能", () => {
+  // skill-goals-v1 有資料、skill-pwa-v1 從來沒存過：舊版一直是給他記憶體裡的
+  // 預設技能，升級後不能變成一片空白
+  const store = createStore(backend({[LEGACY_GOALS_KEY]: GOALS}));
+  store.load();
+  const r = store.migrationReport();
+  assert.equal(r.migrated, true, "目標資料確實遷移了");
+  assert.equal(r.fresh, true, "但技能資料從未存在，仍要給預設技能");
 });

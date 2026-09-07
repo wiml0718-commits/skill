@@ -13,6 +13,9 @@ export const SCHEMA_VERSION = 2;
 export const LEGACY_PWA_KEY = "skill-pwa-v1";
 export const LEGACY_GOALS_KEY = "skill-goals-v1";
 export const BACKUP_KEY = "skill-backup-v1";
+// 既有 v2 解得開但含壞資料時的原樣快照。sanitize 丟掉的那幾筆也許還救得回來，
+// 覆寫之後就真的沒了。
+export const DAMAGED_KEY = "skill-damaged-v2";
 
 // backend 介面只需要 getItem / setItem，方便替換與測試。
 function memoryBackend(){
@@ -93,8 +96,12 @@ function sanitize(raw){
     if(!raw[k] || typeof raw[k] !== "object") report.missingSections += 1;
   }
 
-  try{ data.profile = model.createProfile(raw.profile || {}); }catch{ /* 用預設 */ }
-  try{ data.meta = model.createMeta(raw.meta || {}); }catch{ /* 用預設 */ }
+  // 還原失敗時整個區段被預設值取代：一個壞掉的 createdAt 會連角色名稱與
+  // 未歸屬 XP 一起換掉。跟區段缺席一樣是整區的損失，同樣要計入。
+  try{ data.profile = model.createProfile(raw.profile || {}); }
+  catch{ report.missingSections += 1; }
+  try{ data.meta = model.createMeta(raw.meta || {}); }
+  catch{ report.missingSections += 1; }
 
   // 存過的 cores 一律照收，即使是空陣列——那代表使用者把核心全刪了。
   // 用長度當守衛會讓已刪的核心在下次載入時整批復活。跳過的壞資料進 report。
@@ -338,6 +345,15 @@ export function createStore(backend = defaultBackend()){
         report = out.report;
         migrated = false;
         fresh = false;
+        // 這次載入丟掉了東西，而接下來的 commit() 會用丟過的版本覆寫唯一一份
+        // v2。先把原樣留一份（已存在則不覆寫，讀不到既有快照時寧可不寫）。
+        if(reportTotal(report) > 0){
+          const damagedRead = read(backend, DAMAGED_KEY);
+          if(damagedRead.ok && !damagedRead.text){
+            try{ backend.setItem(DAMAGED_KEY, primary.text); }
+            catch{ /* 快照寫不進去也不能擋住載入 */ }
+          }
+        }
       }else{
         const pwaRead = read(backend, LEGACY_PWA_KEY);
         const goalsRead = read(backend, LEGACY_GOALS_KEY);
@@ -354,9 +370,13 @@ export function createStore(backend = defaultBackend()){
         data = out.data;
         report = out.report;
         migrated = !!(pwa || goals);
-        // 全新安裝（不是「使用者把資料清空了」）。這兩件事必須分得出來，
-        // 否則刪光技能之後重開，預設技能會自己長回來。
-        fresh = !migrated;
+        // 「該給預設技能嗎」問的是技能資料存不存在，不是有沒有遷移。只用過
+        // 目標頁的使用者有 skill-goals-v1 但沒有 skill-pwa-v1，舊版一直是拿
+        // 記憶體裡的預設技能給他看；用 !migrated 判斷會讓他升級後技能全空。
+        //
+        // 但「使用者把技能刪光了」仍然要跟「從來沒有過技能資料」分得出來，
+        // 所以看的是 skill-pwa-v1 這份資料在不在，而不是技能陣列是不是空的。
+        fresh = !(pwa && typeof pwa === "object");
         // 轉換前先留一份原樣快照，已存在則不覆寫。讀不到既有快照時寧可不寫——
         // 蓋掉一份可能還在的原始備份，比少留一份新的嚴重。
         const backupRead = read(backend, BACKUP_KEY);
