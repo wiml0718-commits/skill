@@ -290,7 +290,6 @@ export function createStore(backend = defaultBackend()){
   // 儲存讀不到時進入唯讀模式：資料只留在記憶體，一律不寫回去。
   let degraded = false;
 
-
   function persist(){
     // 兩種情況一律不寫：讀不到儲存（記憶體狀態不是使用者真正的資料），以及
     // 這次載入丟掉了東西而原樣快照沒留成（現有的 v2 是那幾筆僅存的一份）。
