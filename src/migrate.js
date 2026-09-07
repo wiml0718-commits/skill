@@ -27,6 +27,9 @@ export function emptyReport(){
     orphanSkills: 0,
     // v2 備份整段不見（例如被截斷的檔案）也是損失，只是損失的是一整區而不是幾筆
     missingSections: 0,
+    // 壞掉的 XP 紀錄與成就解鎖紀錄同樣是使用者看不見的損失
+    skippedXpLog: 0,
+    skippedAchievements: 0,
   };
 }
 
@@ -37,7 +40,8 @@ export function emptyReport(){
 export function reportTotal(report){
   return report.skippedCores + report.skippedSkills + report.skippedQuests
        + report.skippedGoals + report.skippedSteps + report.droppedRewards
-       + report.missingSections + report.orphanSkills;
+       + report.missingSections + report.orphanSkills
+       + report.skippedXpLog + report.skippedAchievements;
 }
 
 // 前綴解決的是命名空間，不是碰撞：兩筆 quest 帶著相同數字 id 時，加了前綴仍然
@@ -205,26 +209,35 @@ function migrateQuests(raw, refMap, used, report){
 }
 
 // ── Goal / Step 層 ───────────────────────────────────────────────────────────
+// 回傳 {goals, refMap}。goal id 撞在一起時比照 skill / quest / step 逐筆讓開，
+// 不能靜默丟掉第二筆——它有自己的標題與狀態。step 的 goalId 只帶舊 id，
+// 因此另外維護「舊 id → 第一筆的新 id」的引用表，與 reward 的規則一致。
 function migrateGoals(raw, report){
   const goals = [];
+  const refMap = new Map();
   const used = new Set();
   for(const g of Array.isArray(raw) ? raw : []){
+    if(!g || typeof g !== "object"){ report.skippedGoals += 1; continue; }
+    const oldKey = String(g.id ?? "");
+    const id = uniqueId(`${legacyIdPart(g.id) || "g"}`, used, report);
     try{
-      const goal = model.createGoal({...g, coreId: null});
-      if(used.has(goal.id)) continue;
-      used.add(goal.id);
-      goals.push(goal);
-    }catch{ report.skippedGoals += 1; }
+      goals.push(model.createGoal({...g, id, coreId: null}));
+      if(oldKey !== "" && !refMap.has(oldKey)) refMap.set(oldKey, id);
+    }catch{
+      used.delete(id);
+      report.skippedGoals += 1;
+    }
   }
-  return goals;
+  return {goals, refMap};
 }
 
-function migrateGoalSteps(raw, goalIds, used, report){
+function migrateGoalSteps(raw, goalRefMap, used, report){
   const steps = [];
   for(const s of Array.isArray(raw) ? raw : []){
     if(!s || typeof s !== "object"){ report.skippedSteps += 1; continue; }
-    // 指向不存在目標的 step 退回收件匣，而不是直接丟棄
-    const goalId = s.goalId != null && goalIds.has(s.goalId) ? s.goalId : null;
+    // 指向不存在目標的 step 退回收件匣，而不是直接丟棄。
+    // 舊 goalId 一律查引用表，id 讓開之後才不會指到別人的目標。
+    const goalId = s.goalId != null ? (goalRefMap.get(String(s.goalId)) ?? null) : null;
     const id = uniqueId(`${legacyIdPart(s.id) || "s"}`, used, report);
     try{
       steps.push(model.createStep({
@@ -259,9 +272,8 @@ export function migrateV1({pwa = null, goals = null, now = new Date()} = {}){
   const usedStepIds = new Set();
   const questSteps = migrateQuests(src.quests, refMap, usedStepIds, report);
 
-  const goalList = migrateGoals(gsrc.goals, report);
-  const goalIds = new Set(goalList.map(g => g.id));
-  const goalSteps = migrateGoalSteps(gsrc.steps, goalIds, usedStepIds, report);
+  const {goals: goalList, refMap: goalRefMap} = migrateGoals(gsrc.goals, report);
+  const goalSteps = migrateGoalSteps(gsrc.steps, goalRefMap, usedStepIds, report);
 
   const steps = [...questSteps, ...goalSteps];
 

@@ -57,8 +57,13 @@ function copySkill(s){
 const copy = rec => (rec ? {...rec} : rec);
 const copyAll = (list, fn = copy) => list.map(fn);
 
-function parse(text){
-  try{ return text ? JSON.parse(text) : null; }catch{ return null; }
+// 「沒有這個 key」與「有值但解不開」是兩件事。都回傳 null 的話，一份被截斷的
+// v2 會被當成不存在，接著 commit() 用預設值或遷移結果蓋掉它——那份殘缺的 JSON
+// 也許還能手動救回來，覆蓋之後就真的沒了。
+function decode(text){
+  if(text === null || text === undefined || text === "") return {ok: true, value: null};
+  try{ return {ok: true, value: JSON.parse(text)}; }
+  catch{ return {ok: false, value: null}; }
 }
 
 // backend.getItem 本身可能丟例外（受限的隱私 / 儲存環境）。讓它往上冒會使
@@ -145,7 +150,8 @@ function sanitize(raw){
   }
 
   for(const e of Array.isArray(raw.xpLog) ? raw.xpLog : []){
-    try{ data.xpLog.push(model.createXpEntry(e)); }catch{ /* 跳過壞掉的紀錄 */ }
+    try{ data.xpLog.push(model.createXpEntry(e)); }
+    catch{ report.skippedXpLog += 1; }
   }
   const unlocked = new Set();
   for(const a of Array.isArray(raw.achievements) ? raw.achievements : []){
@@ -154,7 +160,7 @@ function sanitize(raw){
       if(unlocked.has(ach.id)) continue;
       unlocked.add(ach.id);
       data.achievements.push(ach);
-    }catch{ /* 跳過壞掉的解鎖紀錄 */ }
+    }catch{ report.skippedAchievements += 1; }
   }
 
   return {data, report};
@@ -322,7 +328,10 @@ export function createStore(backend = defaultBackend()){
     load(){
       const primary = read(backend, STORAGE_KEY);
       if(!primary.ok) return enterDegraded();
-      const existing = parse(primary.text);
+      const decoded = decode(primary.text);
+      // 有值但解不開時同樣停手：那份資料還在，只是這次讀不懂。
+      if(!decoded.ok) return enterDegraded();
+      const existing = decoded.value;
       if(existing){
         const out = sanitize(existing);
         data = out.data;
@@ -335,8 +344,12 @@ export function createStore(backend = defaultBackend()){
         // 舊 key 讀不到也一樣要停手。當成「沒有舊資料」會寫出一份預設的 v2，
         // 之後每次開啟都直接讀 v2、再也不會回頭看那個其實還在的舊 key。
         if(!pwaRead.ok || !goalsRead.ok) return enterDegraded();
-        const pwa = parse(pwaRead.text);
-        const goals = parse(goalsRead.text);
+        const pwaDecoded = decode(pwaRead.text);
+        const goalsDecoded = decode(goalsRead.text);
+        // 舊資料解不開時也不要遷移：寫出一份殘缺的 v2，之後就再也不會回頭讀它。
+        if(!pwaDecoded.ok || !goalsDecoded.ok) return enterDegraded();
+        const pwa = pwaDecoded.value;
+        const goals = goalsDecoded.value;
         const out = migrateV1({pwa, goals});
         data = out.data;
         report = out.report;

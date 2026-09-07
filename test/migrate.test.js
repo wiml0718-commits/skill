@@ -243,3 +243,41 @@ test("被丟掉的獎勵會計入回報總數", () => {
   // 只丟了獎勵、沒有整筆跳過時，總數不能是 0，否則畫面會說「一切正常」
   assert.equal(reportTotal(report), 1);
 });
+
+test("重複的 goal id 兩筆都留著，各自拿到唯一 id", () => {
+  const goals = {
+    goals: [
+      {id: "g_dup", title: "跑完半馬", why: "體力", status: "active"},
+      {id: "g_dup", title: "學會游泳", why: "", status: "active"},
+    ],
+    steps: [],
+  };
+  const {data, report} = migrateV1({pwa: legacyPwa(), goals});
+  assert.deepEqual(data.goals.map(g => [g.id, g.title]),
+                   [["g_dup", "跑完半馬"], ["g_dup_2", "學會游泳"]]);
+  assert.equal(report.suffixedIds, 1);
+  assert.equal(report.skippedGoals, 0, "第二筆不是壞資料，不能算成跳過");
+});
+
+test("goal id 讓開之後，step 的 goalId 依 first-match 指向第一筆", () => {
+  const goals = {
+    goals: [
+      {id: "g_dup", title: "跑完半馬", why: "", status: "active"},
+      {id: "g_dup", title: "學會游泳", why: "", status: "active"},
+    ],
+    steps: [{id: "s1", goalId: "g_dup", title: "買鞋", order: 0, state: "•"}],
+  };
+  const {data} = migrateV1({pwa: legacyPwa(), goals});
+  const step = data.steps.find(s => s.id === "s1");
+  // 使用者在舊版看到的一直是第一筆，改指向後綴筆會把步驟搬到他沒看過的目標底下
+  assert.equal(step.goalId, "g_dup");
+  assert.equal(step.kind, "main");
+});
+
+test("指向不存在目標的步驟仍退回收件匣", () => {
+  const goals = {goals: [], steps: [{id: "s1", goalId: "ghost", title: "孤兒", order: 0}]};
+  const {data} = migrateV1({pwa: legacyPwa(), goals});
+  const step = data.steps.find(s => s.id === "s1");
+  assert.equal(step.goalId, null);
+  assert.equal(step.kind, "inbox");
+});

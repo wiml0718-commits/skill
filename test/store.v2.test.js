@@ -388,3 +388,40 @@ test("孤兒技能計入損失，不會回報成一切正常", () => {
   assert.equal(preview.orphanSkills, 1);
   assert.ok(preview.total >= 1, "看不到的資料不能被當成沒問題");
 });
+
+test("v2 內容解不開時停手，不用預設值蓋掉可能還救得回來的資料", () => {
+  const written = [];
+  const store = createStore({
+    getItem: k => (k === STORAGE_KEY ? '{"version":2,"cores":[' : null),
+    setItem: k => {written.push(k);},
+  });
+  store.load();
+  assert.equal(store.migrationReport().degraded, true);
+  assert.deepEqual(written, [], "殘缺的 JSON 也許還能手動救，覆蓋之後就真的沒了");
+});
+
+test("舊資料解不開時也不遷移", () => {
+  const written = [];
+  const store = createStore({
+    getItem: k => (k === LEGACY_PWA_KEY ? "{壞掉的 JSON" : null),
+    setItem: k => {written.push(k);},
+  });
+  store.load();
+  assert.equal(store.migrationReport().degraded, true);
+  assert.deepEqual(written, []);
+});
+
+test("壞掉的 XP 紀錄與成就紀錄會計入損失，不會被靜默丟掉", () => {
+  const store = createStore(backend());
+  store.load();
+  const preview = store.inspect({
+    version: 2,
+    profile: {charName: "x"}, cores: [], skills: [], goals: [], steps: [],
+    xpLog: [{id: "x1", date: "不是日期", skillId: null, xp: 5, source: "step"}],
+    achievements: [{id: "first_step", unlockedAt: "不是時間"}],
+    meta: {},
+  });
+  assert.equal(preview.skippedXpLog, 1);
+  assert.equal(preview.skippedAchievements, 1);
+  assert.equal(preview.total, 2, "匯入前的確認必須看得到這兩筆");
+});
