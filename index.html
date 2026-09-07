@@ -1334,7 +1334,9 @@ let questFilter = "all"; // all | main | side | daily | done | archive
 
 function renderQuests(){
   if(!state.quests)state.quests=[];
-  const now = new Date(); now.setHours(0,0,0,0);
+  // 到期標籤同樣以邏輯日為準（§5.0），否則凌晨 0-4 點卡片會說「逾期 1 天」，
+  // 提醒面板與 checkOverdue() 卻說今天到期。
+  const today = todayStr();
 
   // For daily: never truly "done", show all dailies under daily tab
   const isActive = q => q.type==="daily" ? true : !q.done && !q.archived;
@@ -1389,23 +1391,23 @@ function renderQuests(){
           <div style="flex:1;height:1px;background:linear-gradient(90deg,transparent,#f59e0b44)"></div>
         </div>`;
       }
-      return divider+renderQuestCard(q,now);
+      return divider+renderQuestCard(q,today);
     }).join("");
   } else if(questFilter==="daily"||questFilter==="all"){
     // Split daily into undone / done-today
     const dailyUndone=filtered.filter(q=>q.type==="daily"&&!isDailyDoneToday(q));
     const dailyDone=filtered.filter(q=>q.type==="daily"&&isDailyDoneToday(q));
     const others=filtered.filter(q=>q.type!=="daily");
-    const otherCards=others.map(q=>renderQuestCard(q,now)).join("");
-    const undoneCards=dailyUndone.map(q=>renderQuestCard(q,now)).join("");
+    const otherCards=others.map(q=>renderQuestCard(q,today)).join("");
+    const undoneCards=dailyUndone.map(q=>renderQuestCard(q,today)).join("");
     const doneCards=dailyDone.length>0
       ?`<div style="color:var(--muted);font-size:9px;letter-spacing:2px;margin:14px 0 8px;padding-left:2px">
           ✓ 今日已完成 (${dailyDone.length})
-        </div>${dailyDone.map(q=>renderQuestCard(q,now)).join("")}`
+        </div>${dailyDone.map(q=>renderQuestCard(q,today)).join("")}`
       :"";
     cards=otherCards+undoneCards+doneCards;
   } else {
-    cards=filtered.map(q=>renderQuestCard(q,now)).join("");
+    cards=filtered.map(q=>renderQuestCard(q,today)).join("");
   }
 
   const doneCnt=state.quests.filter(q=>q.done&&q.type!=="daily"&&!q.archived).length;
@@ -1440,12 +1442,11 @@ function renderQuests(){
     <button class="quest-add-fab" onclick="openAddQuest()">＋</button>`;
 }
 
-function renderQuestCard(q, now){
+function renderQuestCard(q, today){
   const qt = QUEST_TYPES[q.type]||QUEST_TYPES.side;
   let dueHtml="", isOverdue=false, isSoon=false;
   if(q.dueDate&&!q.done){
-    const due=new Date(q.dueDate); due.setHours(0,0,0,0);
-    const diff=Math.round((due-now)/(1000*60*60*24));
+    const diff=daysUntil(today,q.dueDate);
     isOverdue=diff<0;
     isSoon=diff>=0&&diff<=3;
     const dueLabel=isOverdue?`逾期 ${Math.abs(diff)} 天`
@@ -1524,6 +1525,13 @@ function renderQuestCard(q, now){
 
 // 日界凌晨 4:00（§5.0）。整個 app 只有這一個「今天」，由 src/rpg.js 提供。
 function todayStr(){return window.Goals.todayISO();}
+// 兩個 YYYY-MM-DD 相差幾天。用 UTC 做算術，避免日光節約時間讓某些日子變成
+// 23 或 25 小時；直接 new Date("YYYY-MM-DD") 則是 UTC 午夜，在負偏移的時區
+// 會整個早一天。
+function daysUntil(fromISO,toISO){
+  const at=iso=>{const[y,m,d]=String(iso).split("-").map(Number);return Date.UTC(y,m-1,d);};
+  return Math.round((at(toISO)-at(fromISO))/86400000);
+}
 function isDailyDoneToday(q){
   if(q.type!=="daily"||!q.lastCompletedDate)return false;
   return q.lastCompletedDate===todayStr();
