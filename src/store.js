@@ -61,6 +61,12 @@ function parse(text){
   try{ return text ? JSON.parse(text) : null; }catch{ return null; }
 }
 
+// backend.getItem 本身可能丟例外（受限的隱私 / 儲存環境）。讓它往上冒會使
+// install() 在掛上 window.Goals 之前就中斷，整個 app 停在載入中的提示畫面。
+function read(backend, key){
+  try{ return backend.getItem(key); }catch{ return null; }
+}
+
 // 壞掉的單筆資料就丟掉，不讓整包資料因為一筆髒資料而全滅。
 // 但跳過的筆數要能回報出去——靜默的資料遺失是察覺不到的（§7.1）。
 function sanitize(raw){
@@ -226,6 +232,21 @@ function toLegacySkill(s){
   };
 }
 
+// 匯入的轉換。inspect() 與 replaceAll() 共用，才不會出現「試算說沒問題、
+// 實際匯入卻掉資料」這種兩套邏輯各自演化的情況。
+function convert(raw){
+  const looksV1 = raw && typeof raw === "object" && !raw.profile
+    && (Array.isArray(raw.subSkills) || typeof raw.charName === "string");
+  // 舊版匯出把 Goal/Step 放在 goalsData 信封裡，不是攤平在頂層。只讀頂層的話
+  // 這類備份會靜默丟掉所有目標與步驟，還回報匯入成功。
+  const env = looksV1 && raw.goalsData && typeof raw.goalsData === "object"
+    ? raw.goalsData : raw;
+  const out = looksV1
+    ? migrateV1({pwa: raw, goals: {goals: env.goals, steps: env.steps}})
+    : sanitize(raw);
+  return {...out, looksV1};
+}
+
 const KIND_FROM_LEGACY = {main: model.STEP_KIND.MAIN,
                           side: model.STEP_KIND.SIDE,
                           daily: model.STEP_KIND.DAILY};
@@ -270,7 +291,7 @@ export function createStore(backend = defaultBackend()){
   const store = {
     // 載入：v2 存在就直接用；不存在才跑一次遷移，並且不刪任何舊資料（§7.1）。
     load(){
-      const existing = parse(backend.getItem(STORAGE_KEY));
+      const existing = parse(read(backend, STORAGE_KEY));
       if(existing){
         const out = sanitize(existing);
         data = out.data;
@@ -278,8 +299,8 @@ export function createStore(backend = defaultBackend()){
         migrated = false;
         fresh = false;
       }else{
-        const pwa = parse(backend.getItem(LEGACY_PWA_KEY));
-        const goals = parse(backend.getItem(LEGACY_GOALS_KEY));
+        const pwa = parse(read(backend, LEGACY_PWA_KEY));
+        const goals = parse(read(backend, LEGACY_GOALS_KEY));
         const out = migrateV1({pwa, goals});
         data = out.data;
         report = out.report;
@@ -288,7 +309,7 @@ export function createStore(backend = defaultBackend()){
         // 否則刪光技能之後重開，預設技能會自己長回來。
         fresh = !migrated;
         // 轉換前先留一份原樣快照，已存在則不覆寫
-        if(migrated && !backend.getItem(BACKUP_KEY)){
+        if(migrated && !read(backend, BACKUP_KEY)){
           try{
             backend.setItem(BACKUP_KEY, JSON.stringify({
               savedAt: new Date().toISOString(),
@@ -548,20 +569,19 @@ export function createStore(backend = defaultBackend()){
     // ── 備份匯出 / 匯入 ─────────────────────────────────────────────────────
     toJSON(){return store.getState();},
 
+    // 試算一份備份會轉出什麼，但不落地。匯入是破壞性的：現有資料被蓋掉之後
+    // 才告訴使用者「有 N 筆沒進來」已經來不及了。
+    inspect(raw){
+      const out = convert(raw);
+      return {...out.report, total: reportTotal(out.report), migrated: out.looksV1};
+    },
+
     // v2 直接吃；認得出 v1 就走同一條遷移路徑（§7.4）
     replaceAll(raw){
-      const looksV1 = raw && typeof raw === "object" && !raw.profile
-        && (Array.isArray(raw.subSkills) || typeof raw.charName === "string");
-      // 舊版匯出把 Goal/Step 放在 goalsData 信封裡，不是攤平在頂層。只讀頂層的話
-      // 這類備份會靜默丟掉所有目標與步驟，還回報匯入成功。
-      const env = looksV1 && raw.goalsData && typeof raw.goalsData === "object"
-        ? raw.goalsData : raw;
-      const out = looksV1
-        ? migrateV1({pwa: raw, goals: {goals: env.goals, steps: env.steps}})
-        : sanitize(raw);
+      const out = convert(raw);
       data = out.data;
       report = out.report;
-      migrated = looksV1;
+      migrated = out.looksV1;
       fresh = false;
       commit();
       return store.getState();

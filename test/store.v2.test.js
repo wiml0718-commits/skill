@@ -258,3 +258,42 @@ test("legacy 筆記經過投影往返之後不會消失", () => {
   store.saveLegacyState(store.legacyState());
   assert.equal(store.legacyState().subSkills[0].notes[0].text, "深蹲要先練髖鉸鏈");
 });
+
+test("backend 讀取失敗時仍然開得起來，不會讓 install 中斷", () => {
+  // 受限的隱私 / 儲存環境裡 localStorage 存在，但 getItem 會丟例外。
+  // 讓它往上冒會使 window.Goals 掛不上去，整個 app 停在載入中的提示。
+  const store = createStore({
+    getItem: () => {throw new Error("SecurityError");},
+    setItem: () => {},
+  });
+  const state = store.load();
+  assert.equal(state.cores.length, 9);
+  assert.deepEqual(state.goals, []);
+  assert.equal(store.migrationReport().migrated, false);
+});
+
+test("inspect 只試算不落地，數字與實際匯入一致", () => {
+  const store = createStore(backend({[LEGACY_PWA_KEY]: PWA}));
+  store.load();
+  const before = store.getState().profile.charName;
+
+  const dirty = {charName: "別人", subSkills: [
+    {id: 1, coreId: "body", name: "重訓", xp: 10},
+    {id: 2, coreId: "body", name: "   "},        // 空標題，會被跳過
+  ]};
+  const preview = store.inspect(dirty);
+  assert.equal(preview.total, 1);
+  assert.equal(store.getState().profile.charName, before, "試算不能改到任何資料");
+
+  const after = store.replaceAll(dirty);
+  assert.equal(after.profile.charName, "別人");
+  assert.equal(store.migrationReport().total, preview.total, "試算與實際必須一致");
+});
+
+test("乾淨的備份試算為 0，不會多問一次", () => {
+  const src = createStore(backend({[LEGACY_PWA_KEY]: PWA}));
+  src.load();
+  const store = createStore(backend());
+  store.load();
+  assert.equal(store.inspect(src.toJSON()).total, 0);
+});

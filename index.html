@@ -790,11 +790,22 @@ function importData(e){
       const isV2=Array.isArray(d.cores)&&Array.isArray(d.skills);
       const isV1=typeof d.charName==="string"&&Array.isArray(d.subSkills);
       if(!isV2&&!isV1)throw new Error("認不得的備份格式");
+      // 匯入會覆蓋目前的資料且無法復原，所以先試算一次。等蓋掉之後才說
+      // 「有 N 項沒進來」已經來不及了。
+      const preview=window.Goals.inspectPayload(d);
+      if(preview.total>0&&!confirm(
+        `這份備份有 ${preview.total} 項資料無法轉換，匯入後不會出現。\n`+
+        "目前的資料會被覆蓋，且無法復原。\n\n仍要匯入嗎？")){
+        return;
+      }
       // store 認得 v1 與 v2，兩者走同一條轉換路徑
       window.Goals.importPayload(d);
       loadState();
       if(state.cores)syncCores();
-      render();showToast("✓ 匯入成功");
+      render();
+      showToast(preview.total>0
+        ?`✓ 匯入完成（${preview.total} 項資料無法轉換）`
+        :"✓ 匯入成功",preview.total>0?4000:1800);
     }catch(err){
       alert(`匯入失敗：${err.message||"檔案格式不正確"}`);
     }

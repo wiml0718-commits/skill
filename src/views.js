@@ -343,6 +343,7 @@ const api = {
   // 與既有的備份匯出 / 匯入串接
   exportPayload(){return store.toJSON();},
   importPayload(data){store.replaceAll(data);},
+  inspectPayload(data){return store.inspect(data);},
 
   // index.html 的內嵌 script 仍以 legacy 形狀工作，透過這兩個方法讀寫 store，
   // 不再直接碰 localStorage。UI 的統一是 PR 3 的事。
