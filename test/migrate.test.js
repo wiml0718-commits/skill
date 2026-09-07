@@ -1,6 +1,6 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
-import {migrateV1} from "../src/migrate.js";
+import {migrateV1, reportTotal} from "../src/migrate.js";
 import * as m from "../src/model.js";
 
 // 一份「正常的舊資料」：欄位都是 legacy UI 實際會寫出來的形狀，不是理想化的樣本。
@@ -199,4 +199,47 @@ test("遷移不追溯造 xpLog，既有 XP 留在技能上當起始值", () => {
   assert.deepEqual(data.xpLog, []);
   assert.deepEqual(data.achievements, []);
   assert.equal(m.coreXp(data.skills, "body"), 80);
+});
+
+test("legacy 筆記不會在遷移時整批消失", () => {
+  const pwa = legacyPwa();
+  // 舊 UI 的 note id 是 Date.now() 產生的數字，過不了 v2 的 id 規則
+  pwa.subSkills[0].notes = [
+    {id: 1756000000000, text: "深蹲要先練髖鉸鏈", date: "2026/8/1"},
+    {id: 1756000000001, text: "組間休息 90 秒", date: "2026/8/2"},
+  ];
+  const {data} = migrateV1({pwa});
+  const notes = data.skills[0].notes;
+  assert.equal(notes.length, 2, "筆記是使用者累積的知識，一則都不能掉");
+  assert.deepEqual(notes.map(n => n.text), ["深蹲要先練髖鉸鏈", "組間休息 90 秒"]);
+  assert.deepEqual(notes.map(n => n.id), ["n_1756000000000", "n_1756000000001"]);
+  assert.deepEqual(notes.map(n => n.date), ["2026/8/1", "2026/8/2"]);
+});
+
+test("沒有 id 的筆記會拿到一個新 id，而不是被丟掉", () => {
+  const pwa = legacyPwa();
+  pwa.subSkills[0].notes = [{text: "沒有 id 的舊筆記"}];
+  const {data} = migrateV1({pwa});
+  assert.equal(data.skills[0].notes.length, 1);
+  assert.ok(data.skills[0].notes[0].id);
+});
+
+test("cores 是空陣列代表核心被刪光了，不是沒存過", () => {
+  const {data} = migrateV1({pwa: legacyPwa({cores: []})});
+  assert.deepEqual(data.cores, [], "不能把九個內建核心長回來");
+});
+
+test("cores 欄位不存在時才回到內建預設", () => {
+  const pwa = legacyPwa();
+  delete pwa.cores;
+  assert.equal(migrateV1({pwa}).data.cores.length, 9);
+});
+
+test("被丟掉的獎勵會計入回報總數", () => {
+  const pwa = legacyPwa();
+  pwa.quests[0].rewards = [{skillId: 999, xp: 30}];
+  const {report} = migrateV1({pwa});
+  assert.equal(report.droppedRewards, 1);
+  // 只丟了獎勵、沒有整筆跳過時，總數不能是 0，否則畫面會說「一切正常」
+  assert.equal(reportTotal(report), 1);
 });

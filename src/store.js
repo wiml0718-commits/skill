@@ -3,7 +3,8 @@
 // IndexedDB 時不需要動到任何檢視程式碼。規格見 docs/RPG_SPEC.md §3、§7。
 
 import * as model from "./model.js";
-import {migrateV1, emptyReport, reportTotal, hasMergeNote} from "./migrate.js";
+import {migrateV1, emptyReport, reportTotal, hasMergeNote, normalizeLegacyNotes}
+  from "./migrate.js";
 
 export const STORAGE_KEY = "skill-rpg-v2";
 export const SCHEMA_VERSION = 2;
@@ -70,6 +71,8 @@ function sanitize(raw){
   try{ data.profile = model.createProfile(raw.profile || {}); }catch{ /* 用預設 */ }
   try{ data.meta = model.createMeta(raw.meta || {}); }catch{ /* 用預設 */ }
 
+  // 存過的 cores 一律照收，即使是空陣列——那代表使用者把核心全刪了。
+  // 用長度當守衛會讓已刪的核心在下次載入時整批復活。跳過的壞資料進 report。
   if(Array.isArray(raw.cores)){
     const cores = [];
     const used = new Set();
@@ -81,7 +84,7 @@ function sanitize(raw){
         cores.push(core);
       }catch{ report.skippedCores += 1; }
     });
-    if(cores.length) data.cores = cores.sort((a, b) => a.order - b.order);
+    data.cores = cores.sort((a, b) => a.order - b.order);
   }
   const coreIds = new Set(data.cores.map(c => c.id));
 
@@ -213,16 +216,6 @@ function toLegacyQuest(s){
     archived: s.archived,
     archivedAt: s.archivedAt,
   };
-}
-
-// legacy 的 note id 是 Date.now() 產生的數字，過不了 ID_PATTERN，先轉成合法形狀。
-function legacyNotes(raw){
-  const out = [];
-  for(const n of Array.isArray(raw) ? raw : []){
-    if(!n || typeof n !== "object") continue;
-    out.push({...n, id: coerceId(n.id, "n") || undefined});
-  }
-  return out;
 }
 
 function toLegacySkill(s){
@@ -451,7 +444,9 @@ export function createStore(backend = defaultBackend()){
       }
 
       const prevCoreIds = new Set(data.cores.map(c => c.id));
-      if(Array.isArray(state.cores) && state.cores.length){
+      // 空陣列代表使用者把最後一個核心也刪了。用長度當守衛會讓那個核心
+      // 在下次載入時復活，所以只要是陣列就照收。
+      if(Array.isArray(state.cores)){
         const cores = [];
         const used = new Set();
         state.cores.forEach((c, i) => {
@@ -462,7 +457,7 @@ export function createStore(backend = defaultBackend()){
             cores.push(core);
           }catch{ /* 跳過壞掉的核心 */ }
         });
-        if(cores.length) data.cores = cores;
+        data.cores = cores;
       }
       const coreIds = new Set(data.cores.map(c => c.id));
       const coreRemoved = [...prevCoreIds].some(id => !coreIds.has(id));
@@ -479,7 +474,7 @@ export function createStore(backend = defaultBackend()){
           const skill = model.createSkill({
             ...raw,
             id,
-            notes: legacyNotes(raw.notes),
+            notes: normalizeLegacyNotes(raw.notes),
             builtin: false,
             // legacy 的形狀帶不動這兩個欄位，沿用既有值才不會每存一次就抹掉一次。
             mergedFrom: prev ? prev.mergedFrom : (hasMergeNote(raw.notes) ? [] : null),
@@ -557,8 +552,12 @@ export function createStore(backend = defaultBackend()){
     replaceAll(raw){
       const looksV1 = raw && typeof raw === "object" && !raw.profile
         && (Array.isArray(raw.subSkills) || typeof raw.charName === "string");
+      // 舊版匯出把 Goal/Step 放在 goalsData 信封裡，不是攤平在頂層。只讀頂層的話
+      // 這類備份會靜默丟掉所有目標與步驟，還回報匯入成功。
+      const env = looksV1 && raw.goalsData && typeof raw.goalsData === "object"
+        ? raw.goalsData : raw;
       const out = looksV1
-        ? migrateV1({pwa: raw, goals: {goals: raw.goals, steps: raw.steps}})
+        ? migrateV1({pwa: raw, goals: {goals: env.goals, steps: env.steps}})
         : sanitize(raw);
       data = out.data;
       report = out.report;

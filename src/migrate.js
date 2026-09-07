@@ -28,9 +28,11 @@ export function emptyReport(){
   };
 }
 
+// 被丟掉的獎勵也是使用者看不見的損失，必須一起計入回報。整筆跳過與局部丟失
+// 對使用者的意義一樣：資料進不來了。
 export function reportTotal(report){
   return report.skippedCores + report.skippedSkills + report.skippedQuests
-       + report.skippedGoals + report.skippedSteps;
+       + report.skippedGoals + report.skippedSteps + report.droppedRewards;
 }
 
 // 前綴解決的是命名空間，不是碰撞：兩筆 quest 帶著相同數字 id 時，加了前綴仍然
@@ -53,6 +55,25 @@ function legacyIdPart(raw){
   return String(raw ?? "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 48) || "x";
 }
 
+// legacy 的 note id 是 Date.now() 產生的數字，過不了 v2 的 ID_PATTERN。
+// 直接把 notes 丟進 createSkill 會讓每一則都在 createNote 被擋下、被逐則的
+// catch 靜默丟掉——技能留著，但使用者累積的知識筆記全部消失。
+export function normalizeLegacyNotes(raw){
+  const out = [];
+  for(const n of Array.isArray(raw) ? raw : []){
+    if(!n || typeof n !== "object") continue;
+    out.push({...n, id: legacyNoteId(n.id)});
+  }
+  return out;
+}
+
+function legacyNoteId(raw){
+  if(typeof raw === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(raw)) return raw;
+  const part = legacyIdPart(raw);
+  // 本來就沒有 id 的筆記交給 createNote 自己產一個
+  return raw === undefined || raw === null || raw === "" ? undefined : `n_${part}`;
+}
+
 export function hasMergeNote(notes){
   return Array.isArray(notes)
       && notes.some(n => n && typeof n.text === "string" && n.text.startsWith(MERGE_NOTE_PREFIX));
@@ -61,7 +82,9 @@ export function hasMergeNote(notes){
 // ── cores ────────────────────────────────────────────────────────────────────
 // 使用者刪掉的內建核心不補回來：那是推翻他已經做過的決定（§3.2）。
 function migrateCores(raw, report){
-  const source = Array.isArray(raw) && raw.length ? raw : model.BUILTIN_CORES;
+  // 空陣列代表使用者把核心全刪了，那是他做過的決定；只有欄位根本不存在
+  // （或不是陣列）才回到內建預設。
+  const source = Array.isArray(raw) ? raw : model.BUILTIN_CORES;
   const cores = [];
   const used = new Set();
   source.forEach((c, i) => {
@@ -92,7 +115,7 @@ function migrateSkills(raw, coreIds, report){
       const skill = model.createSkill({
         ...s,
         id,
-        notes: s.notes,
+        notes: normalizeLegacyNotes(s.notes),
         mergedFrom: hasMergeNote(s.notes) ? [] : null,
         builtin: false,
         createdAt: null,

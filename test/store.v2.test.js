@@ -220,3 +220,41 @@ test("有舊資料可遷移時不算全新安裝", () => {
   assert.equal(r.migrated, true);
   assert.equal(r.fresh, false);
 });
+
+test("匯入舊版備份時 goalsData 信封裡的目標與步驟不會被丟掉", () => {
+  // 舊版 exportData 是 {...state, goalsData:{...}}，不是攤平在頂層
+  const backup = {...PWA, goalsData: {version: 1, goals: GOALS.goals, steps: GOALS.steps}};
+  const store = createStore(backend());
+  store.load();
+  store.replaceAll(backup);
+  const state = store.getState();
+  assert.ok(state.goals.some(g => g.id === "g1"), "目標不能靜默消失");
+  assert.ok(state.steps.some(s => s.id === "s1"), "步驟不能靜默消失");
+});
+
+test("刪掉最後一個核心之後，它不會在重新載入時復活", () => {
+  const be = backend({[LEGACY_PWA_KEY]: PWA});
+  const store = createStore(be);
+  store.load();
+
+  const state = store.legacyState();
+  state.cores = [];
+  state.subSkills = [];
+  store.saveLegacyState(state);
+  assert.deepEqual(store.getState().cores, []);
+  assert.deepEqual(store.getState().skills, [], "承接技能也不該留下");
+
+  const again = createStore(be);
+  again.load();
+  assert.deepEqual(again.getState().cores, []);
+});
+
+test("legacy 筆記經過投影往返之後不會消失", () => {
+  const pwa = {...PWA, subSkills: [{...PWA.subSkills[0],
+    notes: [{id: 1756000000000, text: "深蹲要先練髖鉸鏈", date: "2026/8/1"}]}]};
+  const store = createStore(backend({[LEGACY_PWA_KEY]: pwa}));
+  store.load();
+  assert.equal(store.legacyState().subSkills[0].notes.length, 1);
+  store.saveLegacyState(store.legacyState());
+  assert.equal(store.legacyState().subSkills[0].notes[0].text, "深蹲要先練髖鉸鏈");
+});

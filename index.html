@@ -1863,7 +1863,7 @@ function boot(){
   }
   if(r.migrated){
     showToast(r.total>0
-      ?`✓ 資料已升級（${r.total} 筆無法解析已跳過）`
+      ?`✓ 資料已升級（${r.total} 項資料無法轉換，已跳過）`
       :"✓ 資料已升級",r.total>0?4000:2000);
   }
   checkOverdue();
