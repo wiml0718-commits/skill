@@ -753,6 +753,11 @@ export function createStore(backend = defaultBackend()){
             id,
             notes: normalizeLegacyNotes(raw.notes),
             builtin: false,
+            // XP 只由 XP 引擎改（§4）：既有技能一律沿用 store 裡的值，不吃 legacy
+            // 快照帶回來的數字。快照是載入當下的複本，中間若有任何一次發放，
+            // 拿它回寫就會把那些 XP 靜默還原，只留下 xpLog 那幾筆。
+            // 新技能沒有前一版可沿用（例如全新安裝的預設技能），才用帶進來的值。
+            xp: prev ? prev.xp : raw.xp,
             // legacy 的形狀帶不動這兩個欄位，沿用既有值才不會每存一次就抹掉一次。
             mergedFrom: prev ? prev.mergedFrom : (hasMergeNote(raw.notes) ? [] : null),
             createdAt: prev ? prev.createdAt : null,

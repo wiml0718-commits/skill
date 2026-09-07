@@ -215,6 +215,23 @@ test("扣減量超過現有 XP 時只扣到 0，記錄的是實際變動量", ()
   assert.throws(() => store.adjustSkillXp("sk_nope", 10), /找不到 skill/);
 });
 
+test("過期的 legacy 快照回寫不會還原已發放的 XP", () => {
+  const {store} = fresh();
+  addSkill(store, {id: "sk_a", coreId: "body", xp: 100});
+  // 目標頁完成一個步驟之後，index.html 手上那份快照還停在發放前
+  const stale = store.legacyState();
+  const step = store.addStep({kind: m.STEP_KIND.SIDE, title: "做一件事",
+                              rewards: [{skillId: "sk_a", xp: 30}]});
+  store.completeStep(step.id);
+  assert.equal(xpOf(store, "sk_a"), 130);
+
+  // 之後隨便一次 saveName() / saveQuest() 都會用那份舊快照回寫
+  store.saveLegacyState({...stale, charName: "改個名字"});
+
+  assert.equal(xpOf(store, "sk_a"), 130, "XP 只由 XP 引擎改，不吃快照帶回來的數字");
+  assert.equal(logOf(store).length, 1, "xpLog 也不該多出或少掉紀錄");
+});
+
 test("合併技能：總 XP 不變，紀錄金額為 0", () => {
   const {store} = fresh();
   addSkill(store, {id: "sk_a", coreId: "body", xp: 120});

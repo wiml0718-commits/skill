@@ -1847,12 +1847,11 @@ function deleteQuest(id){
 // ── Check overdue & daily reset on app open (iOS-safe: no background timer dependency) ──
 function checkOverdue(){
   if(!state.quests)return;
-  const now=new Date();now.setHours(0,0,0,0);
-  const overdue=state.quests.filter(q=>{
-    if(q.done||q.type==="daily"||!q.dueDate)return false;
-    const due=new Date(q.dueDate);due.setHours(0,0,0,0);
-    return due<now;
-  });
+  // 逾期同樣以邏輯日為準（§5.0）。用當下的午夜判斷的話，凌晨 0-4 點這個提示會
+  // 說「已逾期」，提醒面板卻說「今日到期」，兩邊對不上。
+  const today=todayStr();
+  const overdue=state.quests.filter(q=>
+    !q.done&&q.type!=="daily"&&q.dueDate&&q.dueDate<today);
   if(overdue.length>0)showToast(`⚠️ 有 ${overdue.length} 個任務已逾期`,2500);
 
   // D: Today summary - count pending daily quests

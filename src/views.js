@@ -23,7 +23,21 @@ function toast(msg){
   if(typeof window !== "undefined" && typeof window.showToast === "function") window.showToast(msg);
 }
 
+// index.html 的內嵌 script 仍拿著一份 legacy 快照（`state`）。store 這邊改完之後
+// 不把它拉新的話，之後任何一次 saveLegacyState(state) 都會用舊的技能 XP 覆蓋掉
+// 剛發放的 XP，只留下 xpLog 那一筆。UI 統一之後（PR 3）這一層就會消失。
+function reloadLegacy(){
+  if(typeof window !== "undefined" && typeof window.loadState === "function") window.loadState();
+}
+
+// 反過來，動 store 之前要先讓 index.html 還在 debounce 的編輯落地，
+// 否則 reloadLegacy() 會把那筆還沒寫進去的編輯蓋掉。
+function flushLegacy(){
+  if(typeof window !== "undefined" && typeof window.flushState === "function") window.flushState();
+}
+
 function repaint(){
+  reloadLegacy();
   if(typeof window !== "undefined" && typeof window.render === "function") window.render();
 }
 
@@ -377,6 +391,7 @@ function bind(root){
     const el = e.target.closest("[data-act]");
     if(!el || !root.contains(el)) return;
     const {act, id, sub: target} = el.dataset;
+    flushLegacy();
     if(act === "sub") return api.setSub(target);
     if(act === "add-goal") return api.addGoal();
     if(act === "capture") return api.capture();
@@ -391,11 +406,15 @@ function bind(root){
 
   root.addEventListener("change", e => {
     const el = e.target.closest('[data-act="assign"]');
-    if(el && root.contains(el)) api.assign(el.dataset.id, el.value);
+    if(!el || !root.contains(el)) return;
+    flushLegacy();
+    api.assign(el.dataset.id, el.value);
   });
 
   root.addEventListener("keydown", e => {
-    if(e.key === "Enter" && e.target.id === "inbox-input") api.capture();
+    if(e.key !== "Enter" || e.target.id !== "inbox-input") return;
+    flushLegacy();
+    api.capture();
   });
 }
 

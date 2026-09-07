@@ -14,8 +14,12 @@ export const DAY_START_HOUR = 4;
 
 // 這是整個 app 唯一的「今天」來源：xpLog.date、streakHistory、meta.activeDays、
 // 到期日比較全部走它，不得各自呼叫 new Date() 取日期。
+//
+// 用本地日曆欄位往回退一天，而不是減 4 小時的時間量：日光節約時間切換的那天，
+// 4 小時的「經過時間」不等於 4 小時的「牆上時鐘」，減出來的日界會跑到 05:00。
 export function logicalToday(now = new Date()){
-  const d = new Date(now.getTime() - DAY_START_HOUR * 3600000);
+  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if(now.getHours() < DAY_START_HOUR) d.setDate(d.getDate() - 1);
   const pad = n => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }

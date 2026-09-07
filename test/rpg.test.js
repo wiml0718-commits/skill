@@ -12,6 +12,11 @@ test("邏輯日：凌晨 4:00 前算前一天", () => {
   // 跨月與跨年的邊界也要跟著退一天
   assert.equal(rpg.logicalToday(new Date(2026, 9, 1, 0, 30)), "2026-09-30");
   assert.equal(rpg.logicalToday(new Date(2027, 0, 1, 2, 0)), "2026-12-31");
+  // 日光節約時間切換當天，日界仍然落在本地時間 04:00：減 4 小時的「時間量」
+  // 會在那天把界線推到 05:00（在 America/New_York 這類時區跑才看得出差別）。
+  assert.equal(rpg.logicalToday(new Date(2026, 2, 8, 4, 0)), "2026-03-08");
+  assert.equal(rpg.logicalToday(new Date(2026, 2, 8, 3, 59)), "2026-03-07");
+  assert.equal(rpg.logicalToday(new Date(2026, 10, 1, 4, 0)), "2026-11-01");
 });
 
 // ── 等級（§4.1、§6.1）──────────────────────────────────────────────────────
