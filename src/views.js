@@ -2,8 +2,10 @@
 // 今日 / 目標 / 收件匣三個檢視。資料一律經由 store 取得，不直接碰 localStorage。
 
 import {createStore} from "./store.js";
-import {STEP_STATE, STEP_STATE_LABEL, GOAL_STATUS, hasDeferWarning, DEFER_WARN_THRESHOLD} from "./model.js";
+import {STEP_STATE, STEP_STATE_LABEL, GOAL_STATUS, hasDeferWarning, DEFER_WARN_THRESHOLD,
+        LEVEL_XP, MAX_LV, calcLv} from "./model.js";
 import {createReminders, todayISO} from "./reminders.js";
+import {lvName, levelProgress} from "./rpg.js";
 
 const store = createStore();
 const reminders = createReminders(store);
@@ -339,6 +341,22 @@ const api = {
     toast("已封存");
     repaint();
   },
+
+  // ── XP 引擎（§4）：index.html 的內嵌 script 不是 module，透過這裡呼叫 ──────
+  completeStep(id){return store.completeStep(id);},
+  backfillDaily(id, date){return store.backfillDaily(id, date);},
+  adjustSkillXp(skillId, delta){return store.adjustSkillXp(skillId, delta);},
+  setSkillXp(skillId, value){return store.setSkillXp(skillId, value);},
+  assignXpEntry(entryId, coreId){return store.assignXpEntry(entryId, coreId);},
+  mergeSkills(spec){return store.mergeSkills(spec);},
+
+  // 等級曲線與階層名的單一來源。凍結避免呼叫端改到共用的門檻表。
+  LEVEL_XP: Object.freeze([...LEVEL_XP]),
+  MAX_LV,
+  calcLv,
+  lvName,
+  levelProgress,
+  todayISO,           // §5.0 的邏輯日：整個 app 唯一的「今天」
 
   // 與既有的備份匯出 / 匯入串接
   exportPayload(){return store.toJSON();},

@@ -9,11 +9,13 @@ const step = (id, due, state = STEP_STATE.TODO) =>
 const quest = (id, dueDate, extra = {}) =>
   ({id, title: `quest ${id}`, type: "main", dueDate, done: false, archived: false, ...extra});
 
-test("todayISO 用本地時區，不會因為 UTC 而早一天翻頁", () => {
+test("todayISO 走邏輯日：本地時區、日界凌晨 4:00", () => {
   // UTC+8 的深夜：toISOString() 會給前一天，本地日期才是正確的
-  const d = new Date(2026, 7, 24, 1, 30);   // 2026-08-24 01:30 本地
-  assert.equal(r.todayISO(d), "2026-08-24");
-  assert.equal(r.todayISO(new Date(2026, 0, 5)), "2026-01-05", "月與日要補零");
+  assert.equal(r.todayISO(new Date(2026, 7, 24, 23, 30)), "2026-08-24");
+  assert.equal(r.todayISO(new Date(2026, 0, 5, 12, 0)), "2026-01-05", "月與日要補零");
+  // 凌晨 1:30 還算前一天：到期判定要跟 streak 與每日結算對得上（§5.0）
+  assert.equal(r.todayISO(new Date(2026, 7, 24, 1, 30)), "2026-08-23");
+  assert.equal(r.todayISO(new Date(2026, 7, 24, 4, 0)), "2026-08-24", "4:00 起就是新的一天");
 });
 
 test("classifyDue 分成逾期、今日、之後", () => {
