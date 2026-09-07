@@ -202,15 +202,30 @@ test("載入時丟掉壞掉的單筆，保留其餘資料", () => {
   assert.deepEqual(store.getState().steps.map(s => s.id), ["s1"]);
 });
 
-test("指向不存在目標的步驟退回收件匣，不被丟棄", () => {
+test("指向不存在目標的步驟退回無目標，不被丟棄", () => {
   const backend = fakeBackend({
-    version: 1,
+    version: 2,
     goals: [],
-    steps: [{id: "s1", goalId: "ghost", title: "孤兒", due: null, order: 0, state: "•"}],
+    steps: [{id: "s1", goalId: "ghost", kind: "main", title: "孤兒",
+             due: null, order: 0, state: "•"}],
   });
   const store = createStore(backend);
   store.load();
-  assert.deepEqual(store.inboxSteps().map(s => s.title), ["孤兒"]);
+  // main 的 goalId 允許為 null，所以整筆留著，只是不再屬於任何目標
+  const kept = store.getState().steps;
+  assert.deepEqual(kept.map(s => [s.title, s.goalId, s.kind]), [["孤兒", null, "main"]]);
+});
+
+test("收件匣項目掛著不存在的目標時仍留在收件匣", () => {
+  const backend = fakeBackend({
+    version: 2,
+    goals: [],
+    steps: [{id: "s1", goalId: "ghost", kind: "inbox", title: "隨手記",
+             due: null, order: 0, state: "•"}],
+  });
+  const store = createStore(backend);
+  store.load();
+  assert.deepEqual(store.inboxSteps().map(s => s.title), ["隨手記"]);
 });
 
 test("匯入的備份夾帶惡意 id 時，該筆會被丟棄", () => {
@@ -251,7 +266,7 @@ test("replaceAll 用於匯入備份，會覆蓋並寫回 backend", () => {
 test("toJSON 給出可直接寫進備份檔的資料", () => {
   const {store} = seeded();
   const dump = store.toJSON();
-  assert.equal(dump.version, 1);
+  assert.equal(dump.version, 2);
   assert.equal(dump.goals.length, 1);
   assert.equal(dump.steps.length, 2);
   assert.deepEqual(JSON.parse(JSON.stringify(dump)), dump, "必須可 JSON 序列化");

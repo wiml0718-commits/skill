@@ -5,12 +5,15 @@ import * as m from "../src/model.js";
 const {TODO, DONE, DEFERRED, SCHEDULED, NOTE} = m.STEP_STATE;
 
 // 測試裡一律指定 id 與 order，讓排序與斷言不依賴時間或亂數。
+// kind 依有沒有目標決定，與 store.addStep 的預設一致。
 const step = (id, goalId, order, state = TODO, due = null) =>
-  m.createStep({id, goalId, title: `step ${id}`, order, state, due});
+  m.createStep({id, goalId, kind: goalId ? m.STEP_KIND.MAIN : m.STEP_KIND.INBOX,
+                title: `step ${id}`, order, state, due});
 
 test("createGoal 帶入預設值並修剪空白", () => {
   const g = m.createGoal({id: "g1", title: "  跑完半馬  ", why: "  為了體力  "});
-  assert.deepEqual(g, {id: "g1", title: "跑完半馬", why: "為了體力", status: "active"});
+  assert.deepEqual(g, {id: "g1", title: "跑完半馬", why: "為了體力", status: "active",
+                       coreId: null});
 });
 
 test("createGoal 拒絕空標題與未知狀態", () => {
@@ -20,8 +23,11 @@ test("createGoal 拒絕空標題與未知狀態", () => {
 
 test("createStep 預設為待辦、無到期日、可歸屬收件匣、順延次數為 0", () => {
   const s = m.createStep({id: "s1", title: "報名", order: 0});
-  assert.deepEqual(s, {id: "s1", goalId: null, title: "報名", due: null, order: 0,
-                       state: TODO, deferCount: 0});
+  assert.deepEqual(s, {id: "s1", goalId: null, kind: "main", title: "報名", desc: "",
+                       due: null, dueTime: null, order: 0, state: TODO, deferCount: 0,
+                       xp: 50, rewards: [], streakHistory: [], completedCount: 0,
+                       lastCompletedDate: null, archived: false, archivedAt: null,
+                       createdAt: null, completedAt: null});
 });
 
 test("既有資料沒有 deferCount 時補 0，壞掉的值也歸零而不丟掉整筆", () => {
@@ -206,9 +212,42 @@ test("todayList 略過沒有可行動步驟的目標", () => {
   assert.deepEqual(m.todayList(goals, steps), []);
 });
 
-test("inboxSteps 只收未歸屬目標的項目，並依序排列", () => {
+test("inboxSteps 只收收件匣項目，並依序排列", () => {
   const steps = [step("s2", null, 1), step("s1", null, 0), step("s3", "g1", 0)];
   assert.deepEqual(m.inboxSteps(steps).map(s => s.id), ["s1", "s2"]);
+});
+
+test("inboxPending 只算還需要行動的收件匣項目", () => {
+  // 整理成筆記之後畫面上已經清空，計數也必須跟著清空，否則成就永遠解不開
+  const steps = [
+    step("s1", null, 0),
+    m.completeStep(step("s2", null, 1)),
+    m.noteStep(step("s3", null, 2)),
+    m.dropStep(step("s4", null, 3)),
+    {...step("s5", null, 4), archived: true},
+  ];
+  assert.deepEqual(m.inboxPending(steps).map(s => s.id), ["s1"]);
+});
+
+test("main 的 goalId 可以是 null，但那樣就不參與下一步推導", () => {
+  // legacy quest 沒有目標概念，遷移後就是這個形狀
+  const orphan = m.createStep({id: "q1", goalId: null, kind: "main", title: "舊任務", order: 0});
+  assert.equal(orphan.goalId, null);
+  assert.equal(m.nextStep([orphan], null), null);
+});
+
+test("nextStep 只看 main，支線與每日任務不擋路也不被遮住", () => {
+  const side = m.createStep({id: "s1", goalId: "g1", kind: "side", title: "支線", order: 0});
+  const daily = m.createStep({id: "s2", goalId: "g1", kind: "daily", title: "每日", order: 1});
+  const main = m.createStep({id: "s3", goalId: "g1", kind: "main", title: "主線", order: 2});
+  assert.equal(m.nextStep([side, daily, main], "g1").id, "s3");
+});
+
+test("封存過的步驟不會被推成下一步", () => {
+  const a = {...m.createStep({id: "s1", goalId: "g1", kind: "main", title: "a", order: 0}),
+             archived: true};
+  const b = m.createStep({id: "s2", goalId: "g1", kind: "main", title: "b", order: 1});
+  assert.equal(m.nextStep([a, b], "g1").id, "s2");
 });
 
 // ── 回顧 ────────────────────────────────────────────────────────────────────
