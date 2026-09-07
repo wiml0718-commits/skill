@@ -806,7 +806,7 @@ function importData(e){
       // 「有 N 項沒進來」已經來不及了。
       const preview=window.Goals.inspectPayload(d);
       if(preview.total>0&&!confirm(
-        `這份備份有 ${preview.total} 項資料無法轉換，匯入後不會出現。\n`+
+        `這份備份有 ${preview.total} 項資料無法完整轉入，匯入後不會出現。\n`+
         "目前的資料會被覆蓋，且無法復原。\n\n仍要匯入嗎？")){
         return;
       }
@@ -816,7 +816,7 @@ function importData(e){
       if(state.cores)syncCores();
       render();
       showToast(preview.total>0
-        ?`✓ 匯入完成（${preview.total} 項資料無法轉換）`
+        ?`✓ 匯入完成（${preview.total} 項資料無法完整轉入）`
         :"✓ 匯入成功",preview.total>0?4000:1800);
     }catch(err){
       alert(`匯入失敗：${err.message||"檔案格式不正確"}`);
@@ -1891,7 +1891,7 @@ function boot(){
   }
   if(r.migrated){
     showToast(r.total>0
-      ?`✓ 資料已升級（${r.total} 項資料無法轉換，已跳過）`
+      ?`✓ 資料已升級（${r.total} 項資料無法完整轉入）`
       :"✓ 資料已升級",r.total>0?4000:2000);
   }
   checkOverdue();

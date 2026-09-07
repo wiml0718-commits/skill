@@ -288,6 +288,17 @@ export function createStore(backend = defaultBackend()){
     persist();
   }
 
+  // 讀不到儲存時的共同出口：記憶體裡給一份可用的空白狀態，但一個字都不寫。
+  function enterDegraded(){
+    data = emptyData();
+    report = emptyReport();
+    migrated = false;
+    fresh = false;
+    degraded = true;
+    ensureGeneralSkills(data);
+    return store.getState();
+  }
+
   function findStep(id){
     const i = data.steps.findIndex(s => s.id === id);
     if(i < 0) throw new Error(`找不到 step：${id}`);
@@ -310,17 +321,7 @@ export function createStore(backend = defaultBackend()){
     // 載入：v2 存在就直接用；不存在才跑一次遷移，並且不刪任何舊資料（§7.1）。
     load(){
       const primary = read(backend, STORAGE_KEY);
-      if(!primary.ok){
-        // 讀不到就什麼都不寫。使用者的資料可能還在，只是這次拿不到；
-        // 用預設值覆蓋過去會讓「暫時讀不到」變成「永久沒有了」。
-        data = emptyData();
-        report = emptyReport();
-        migrated = false;
-        fresh = false;
-        degraded = true;
-        ensureGeneralSkills(data);
-        return store.getState();
-      }
+      if(!primary.ok) return enterDegraded();
       const existing = parse(primary.text);
       if(existing){
         const out = sanitize(existing);
@@ -329,8 +330,13 @@ export function createStore(backend = defaultBackend()){
         migrated = false;
         fresh = false;
       }else{
-        const pwa = parse(read(backend, LEGACY_PWA_KEY).text);
-        const goals = parse(read(backend, LEGACY_GOALS_KEY).text);
+        const pwaRead = read(backend, LEGACY_PWA_KEY);
+        const goalsRead = read(backend, LEGACY_GOALS_KEY);
+        // 舊 key 讀不到也一樣要停手。當成「沒有舊資料」會寫出一份預設的 v2，
+        // 之後每次開啟都直接讀 v2、再也不會回頭看那個其實還在的舊 key。
+        if(!pwaRead.ok || !goalsRead.ok) return enterDegraded();
+        const pwa = parse(pwaRead.text);
+        const goals = parse(goalsRead.text);
         const out = migrateV1({pwa, goals});
         data = out.data;
         report = out.report;
@@ -338,8 +344,10 @@ export function createStore(backend = defaultBackend()){
         // 全新安裝（不是「使用者把資料清空了」）。這兩件事必須分得出來，
         // 否則刪光技能之後重開，預設技能會自己長回來。
         fresh = !migrated;
-        // 轉換前先留一份原樣快照，已存在則不覆寫
-        if(migrated && !read(backend, BACKUP_KEY).text){
+        // 轉換前先留一份原樣快照，已存在則不覆寫。讀不到既有快照時寧可不寫——
+        // 蓋掉一份可能還在的原始備份，比少留一份新的嚴重。
+        const backupRead = read(backend, BACKUP_KEY);
+        if(migrated && backupRead.ok && !backupRead.text){
           try{
             backend.setItem(BACKUP_KEY, JSON.stringify({
               savedAt: new Date().toISOString(),

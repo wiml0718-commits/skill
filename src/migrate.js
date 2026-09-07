@@ -32,10 +32,12 @@ export function emptyReport(){
 
 // 被丟掉的獎勵也是使用者看不見的損失，必須一起計入回報。整筆跳過與局部丟失
 // 對使用者的意義一樣：資料進不來了。
+// 孤兒技能雖然留在資料裡，但它的核心不存在，UI 沒有任何地方顯示得出來。
+// 對使用者來說跟不見了沒兩樣，所以一併計入。
 export function reportTotal(report){
   return report.skippedCores + report.skippedSkills + report.skippedQuests
        + report.skippedGoals + report.skippedSteps + report.droppedRewards
-       + report.missingSections;
+       + report.missingSections + report.orphanSkills;
 }
 
 // 前綴解決的是命名空間，不是碰撞：兩筆 quest 帶著相同數字 id 時，加了前綴仍然

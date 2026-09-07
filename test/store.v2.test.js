@@ -344,3 +344,47 @@ test("完整的 v2 備份不會被誤判成有缺", () => {
   assert.equal(preview.missingSections, 0);
   assert.equal(preview.total, 0);
 });
+
+test("舊 key 讀不到時也要停手，不能寫出一份預設的 v2 蓋掉遷移機會", () => {
+  // v2 還不存在（讀得到、是空的），但舊 key 讀取失敗。當成「沒有舊資料」
+  // 會寫出預設 v2，之後每次開啟都直接讀它，再也不會回頭看那個其實還在的舊 key。
+  const written = [];
+  const store = createStore({
+    getItem: k => {
+      if(k === LEGACY_PWA_KEY) throw new Error("SecurityError");
+      return null;
+    },
+    setItem: k => {written.push(k);},
+  });
+  store.load();
+  assert.equal(store.migrationReport().degraded, true);
+  assert.deepEqual(written, []);
+});
+
+test("備份快照讀不到時寧可不寫，也不蓋掉可能還在的原始備份", () => {
+  const written = [];
+  const store = createStore({
+    getItem: k => {
+      if(k === BACKUP_KEY) throw new Error("SecurityError");
+      if(k === LEGACY_PWA_KEY) return JSON.stringify(PWA);
+      return null;
+    },
+    setItem: k => {written.push(k);},
+  });
+  store.load();
+  // 遷移本身照跑（兩個舊 key 都讀得到），但不覆寫快照
+  assert.equal(store.migrationReport().migrated, true);
+  assert.ok(!written.includes(BACKUP_KEY), "不確定有沒有舊快照時就不要動它");
+});
+
+test("孤兒技能計入損失，不會回報成一切正常", () => {
+  const store = createStore(backend());
+  store.load();
+  // coreId 指向不存在的核心：技能留著，但 UI 沒有任何地方顯示得出來
+  const preview = store.inspect({
+    charName: "x",
+    subSkills: [{id: 1, coreId: "ghost", name: "孤兒技能", xp: 10}],
+  });
+  assert.equal(preview.orphanSkills, 1);
+  assert.ok(preview.total >= 1, "看不到的資料不能被當成沒問題");
+});
