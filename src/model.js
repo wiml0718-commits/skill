@@ -85,7 +85,8 @@ export function newId(prefix){
 
 // id 會被放進 DOM 屬性與事件處理，限制字元集可以在資料邊界就擋掉夾帶內容的 id
 // （例如從匯入的備份檔進來的）。newId() 產生的 id 一律符合這個樣式。
-const ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+export const MAX_ID_LENGTH = 64;
+const ID_PATTERN = new RegExp(`^[A-Za-z0-9_-]{1,${MAX_ID_LENGTH}}$`);
 
 function requireId(id, prefix){
   if(id === undefined || id === null || id === "") return newId(prefix);

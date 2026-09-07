@@ -3,8 +3,8 @@
 // IndexedDB 時不需要動到任何檢視程式碼。規格見 docs/RPG_SPEC.md §3、§7。
 
 import * as model from "./model.js";
-import {migrateV1, emptyReport, reportTotal, hasMergeNote, normalizeLegacyNotes}
-  from "./migrate.js";
+import {migrateV1, emptyReport, reportTotal, hasMergeNote, normalizeLegacyNotes,
+        countSkillDrops, countStepDrops} from "./migrate.js";
 
 export const STORAGE_KEY = "skill-rpg-v2";
 export const SCHEMA_VERSION = 2;
@@ -126,6 +126,7 @@ function sanitize(raw){
     try{
       const skill = model.createSkill(s);
       if(skillIds.has(skill.id)) continue;
+      countSkillDrops(s, skill, report);
       skillIds.add(skill.id);
       data.skills.push(skill);
     }catch{ report.skippedSkills += 1; }
@@ -148,6 +149,7 @@ function sanitize(raw){
     try{
       const step = model.createStep(s);
       if(stepIds.has(step.id)) continue;
+      countStepDrops(s, step, report);
       // 指向不存在目標的 step 退回無目標。main 的 goalId 允許為 null，
       // 所以不需要改 kind，也不會被驗證擋掉（§3.5）。
       if(step.goalId !== null && !goalIds.has(step.goalId)) step.goalId = null;
@@ -283,12 +285,16 @@ export function createStore(backend = defaultBackend()){
   let report = emptyReport();
   let migrated = false;
   let fresh = false;
+  // 覆寫會毀掉還救得回來的資料時，這次開啟就完全不寫（可用，但唯讀）。
+  let holdWrites = false;
   // 儲存讀不到時進入唯讀模式：資料只留在記憶體，一律不寫回去。
   let degraded = false;
 
+
   function persist(){
-    // 讀不到就不寫。這一輪的記憶體狀態不是使用者真正的資料，寫回去等於銷毀。
-    if(degraded) return;
+    // 兩種情況一律不寫：讀不到儲存（記憶體狀態不是使用者真正的資料），以及
+    // 這次載入丟掉了東西而原樣快照沒留成（現有的 v2 是那幾筆僅存的一份）。
+    if(holdWrites) return;
     try{
       backend.setItem(STORAGE_KEY, JSON.stringify(data));
     }catch{ /* 配額滿或無法寫入時保持記憶體狀態，不讓 UI 崩掉 */ }
@@ -308,6 +314,7 @@ export function createStore(backend = defaultBackend()){
     migrated = false;
     fresh = false;
     degraded = true;
+    holdWrites = true;
     ensureGeneralSkills(data);
     return store.getState();
   }
@@ -346,13 +353,19 @@ export function createStore(backend = defaultBackend()){
         migrated = false;
         fresh = false;
         // 這次載入丟掉了東西，而接下來的 commit() 會用丟過的版本覆寫唯一一份
-        // v2。先把原樣留一份（已存在則不覆寫，讀不到既有快照時寧可不寫）。
+        // v2。先把原樣留一份，確定留成了才准覆寫：配額滿或既有快照讀不到時
+        // 硬寫下去，被丟掉的那幾筆就永遠沒了，UI 卻還顯示「已另存備份」。
         if(reportTotal(report) > 0){
           const damagedRead = read(backend, DAMAGED_KEY);
+          let saved = damagedRead.ok && damagedRead.text === primary.text;
           if(damagedRead.ok && !damagedRead.text){
-            try{ backend.setItem(DAMAGED_KEY, primary.text); }
-            catch{ /* 快照寫不進去也不能擋住載入 */ }
+            try{
+              backend.setItem(DAMAGED_KEY, primary.text);
+              saved = true;
+            }catch{ /* 配額滿等寫入失敗 */ }
           }
+          // 既有快照是更早的另一份時同樣不動：覆蓋它等於用舊損失換新損失。
+          holdWrites = !saved;
         }
       }else{
         const pwaRead = read(backend, LEGACY_PWA_KEY);
@@ -396,7 +409,8 @@ export function createStore(backend = defaultBackend()){
 
     // 遷移或載入時跳過了哪些資料。呼叫端負責讓使用者看得到。
     migrationReport(){
-      return {...report, total: reportTotal(report), migrated, fresh, degraded};
+      return {...report, total: reportTotal(report), migrated, fresh, degraded,
+              readOnly: degraded || holdWrites};
     },
 
     // 對外一律回傳複本，避免呼叫端繞過 store 直接改到內部陣列

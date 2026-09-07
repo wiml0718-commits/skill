@@ -815,6 +815,13 @@ function importData(e){
       loadState();
       if(state.cores)syncCores();
       render();
+      // 唯讀模式下匯入只會停在畫面上，重開就沒了。說成匯入成功是騙人的。
+      if(window.Goals.migrationReport().readOnly){
+        alert("匯入的資料只顯示在畫面上，並沒有存進瀏覽器：這次開啟處於唯讀"+
+              "狀態（讀不到儲存空間，或原始資料的備份留不成）。\n\n"+
+              "請先排除儲存問題再重新匯入。");
+        return;
+      }
       showToast(preview.total>0
         ?`✓ 匯入完成（${preview.total} 項資料無法完整轉入）`
         :"✓ 匯入成功",preview.total>0?4000:1800);
@@ -1896,7 +1903,14 @@ function boot(){
   }else if(r.total>0){
     // 一般開啟時讀到壞掉的紀錄同樣要講。不講的話，使用者只會看到東西少了，
     // 卻不知道發生過什麼、也不知道原始資料還留著一份副本。
-    showToast(`⚠ ${r.total} 項資料讀不進來，原始資料已另存一份備份`,4000);
+    if(r.readOnly){
+      alert(`有 ${r.total} 項資料讀不進來，而原始資料的備份這次留不成（可能是`+
+            "儲存空間已滿）。\n"+
+            "為了不覆蓋掉那些還可能救回來的紀錄，這次開啟不會寫入任何東西，"+
+            "所有變更都不會保存。\n\n請先清出瀏覽器儲存空間，再重新開啟。");
+    }else{
+      showToast(`⚠ ${r.total} 項資料讀不進來，原始資料已另存一份備份`,4000);
+    }
   }
   checkOverdue();
   render();

@@ -30,6 +30,9 @@ export function emptyReport(){
     // 壞掉的 XP 紀錄與成就解鎖紀錄同樣是使用者看不見的損失
     skippedXpLog: 0,
     skippedAchievements: 0,
+    // createSkill / createStep 內部濾掉的欄位：整筆留下來了，裡面少了東西
+    droppedNotes: 0,
+    droppedStreakDays: 0,
   };
 }
 
@@ -41,7 +44,8 @@ export function reportTotal(report){
   return report.skippedCores + report.skippedSkills + report.skippedQuests
        + report.skippedGoals + report.skippedSteps + report.droppedRewards
        + report.missingSections + report.orphanSkills
-       + report.skippedXpLog + report.skippedAchievements;
+       + report.skippedXpLog + report.skippedAchievements
+       + report.droppedNotes + report.droppedStreakDays;
 }
 
 // 前綴解決的是命名空間，不是碰撞：兩筆 quest 帶著相同數字 id 時，加了前綴仍然
@@ -51,12 +55,43 @@ function uniqueId(base, used, report){
     used.add(base);
     return base;
   }
+  // id 上限 64 字元。剛好用滿的 id 撞在一起時，直接接後綴會變成 65 字元而被
+  // 驗證擋下、整筆資料丟掉，所以先把 base 讓出後綴需要的長度。
   let n = 2;
-  while(used.has(`${base}_${n}`)) n += 1;
-  const id = `${base}_${n}`;
-  used.add(id);
-  report.suffixedIds += 1;
-  return id;
+  for(;;){
+    const suffix = `_${n}`;
+    const room = model.MAX_ID_LENGTH - suffix.length;
+    const id = `${base.length > room ? base.slice(0, room) : base}${suffix}`;
+    if(!used.has(id)){
+      used.add(id);
+      report.suffixedIds += 1;
+      return id;
+    }
+    n += 1;
+  }
+}
+
+// createSkill / createStep 內部會把壞掉的筆記、獎勵與打卡日期濾掉，而且不丟
+// 例外：上層看到的是「這筆成功了」，那幾個欄位卻已經不見了。差額要補記回來，
+// 否則整包資料的損失總數會回報成 0，快照與警告都不會出現。
+export function countSkillDrops(rawSkill, skill, report){
+  const before = Array.isArray(rawSkill?.notes) ? rawSkill.notes.length : 0;
+  const lost = before - skill.notes.length;
+  if(lost > 0) report.droppedNotes += lost;
+}
+
+export function countStepDrops(rawStep, step, report){
+  const rewards = Array.isArray(rawStep?.rewards) ? rawStep.rewards.length : 0;
+  const lostRewards = rewards - step.rewards.length;
+  if(lostRewards > 0) report.droppedRewards += lostRewards;
+  // 非 daily 的 streakHistory 本來就會被清成空的，那是模型定義不是損失。
+  if(step.kind !== model.STEP_KIND.DAILY) return;
+  // 重複的日期會被正規化成一筆，同樣不是損失，所以先去重再比。
+  const days = Array.isArray(rawStep?.streakHistory)
+    ? new Set(rawStep.streakHistory.map(d => String(d))).size
+    : 0;
+  const lostDays = days - step.streakHistory.length;
+  if(lostDays > 0) report.droppedStreakDays += lostDays;
 }
 
 function legacyIdPart(raw){
@@ -141,6 +176,7 @@ function migrateSkills(raw, coreIds, coreRefMap, report){
         createdAt: null,
       });
       if(!coreIds.has(skill.coreId)) report.orphanSkills += 1;
+      countSkillDrops({notes: normalizeLegacyNotes(s.notes)}, skill, report);
       skills.push(skill);
       if(oldKey !== "" && !refMap.has(oldKey)) refMap.set(oldKey, skill.id);
     }catch{
@@ -189,7 +225,9 @@ function migrateQuests(raw, refMap, used, report){
   list.forEach(({q}, order) => {
     const id = uniqueId(`q_${legacyIdPart(q.id)}`, used, report);
     try{
-      steps.push(model.createStep({
+      // remapRewards 已經計過查不到技能的那些，這裡比的是改寫後還被模型濾掉的
+      const rewards = remapRewards(q, refMap, report);
+      const step = model.createStep({
         id,
         // legacy quest 沒有目標概念，所以連 main 的 goalId 都是 null（§3.5）
         goalId: null,
@@ -200,7 +238,7 @@ function migrateQuests(raw, refMap, used, report){
         dueTime: q.dueTime || null,
         order,
         state: q.done === true ? model.STEP_STATE.DONE : model.STEP_STATE.TODO,
-        rewards: remapRewards(q, refMap, report),
+        rewards,
         streakHistory: q.streakHistory,
         completedCount: q.completedCount,
         lastCompletedDate: q.lastCompletedDate || null,
@@ -210,7 +248,9 @@ function migrateQuests(raw, refMap, used, report){
         archivedAt: q.archived === true ? (q.archivedAt || null) : null,
         createdAt: q.createdAt || null,
         completedAt: q.completedAt || null,
-      }));
+      });
+      countStepDrops({rewards, streakHistory: q.streakHistory}, step, report);
+      steps.push(step);
     }catch{
       used.delete(id);
       report.skippedQuests += 1;

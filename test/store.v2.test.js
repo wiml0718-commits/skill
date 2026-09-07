@@ -487,3 +487,78 @@ test("只用過目標頁的使用者升級後仍拿得到預設技能", () => {
   assert.equal(r.migrated, true, "目標資料確實遷移了");
   assert.equal(r.fresh, true, "但技能資料從未存在，仍要給預設技能");
 });
+
+test("技能筆記被模型濾掉時算損失，會留快照也會回報", () => {
+  const damaged = {
+    version: 2,
+    profile: {}, cores: [{id: "body", name: "身體", order: 0}],
+    skills: [{id: "sk_1", coreId: "body", name: "重訓", type: "active", xp: 10,
+              notes: [{id: 1730000000000, text: "舊格式筆記"}]}],
+    goals: [], steps: [], xpLog: [], achievements: [], meta: {},
+  };
+  const be = backend({[STORAGE_KEY]: damaged});
+  const store = createStore(be);
+  store.load();
+
+  const r = store.migrationReport();
+  assert.equal(r.droppedNotes, 1);
+  assert.equal(r.total, 1, "整筆技能留下來了，但筆記不見了也是損失");
+  assert.deepEqual(be.raw(DAMAGED_KEY), damaged, "覆寫前先留原樣");
+});
+
+test("每日任務的打卡日期被濾掉時算損失，重複日期不算", () => {
+  const store = createStore(backend());
+  store.load();
+  const preview = store.inspect({
+    version: 2,
+    profile: {}, cores: [], skills: [], goals: [],
+    steps: [{id: "s_1", goalId: null, kind: "daily", title: "冥想", order: 0,
+             state: "•", streakHistory: ["2026-08-20", "2026-08-20", "不是日期"]}],
+    xpLog: [], achievements: [], meta: {},
+  });
+  assert.equal(preview.droppedStreakDays, 1, "重複的那筆不算，壞掉的那筆才算");
+  assert.equal(preview.total, 1);
+});
+
+test("原樣快照留不成時完全不寫，也不會謊稱已備份", () => {
+  const damaged = {
+    version: 2, profile: {}, cores: [], skills: [], goals: [], steps: [],
+    xpLog: [{id: "x1", date: "壞", skillId: null, xp: 1, source: "step"}],
+    achievements: [], meta: {},
+  };
+  const raw = JSON.stringify(damaged);
+  const map = new Map([[STORAGE_KEY, raw]]);
+  const be = {
+    getItem: k => (map.has(k) ? map.get(k) : null),
+    // 配額滿：新 key 寫不進去，覆寫既有 key 卻還是會成功
+    setItem: (k, v) => {
+      if(!map.has(k)) throw new Error("QuotaExceededError");
+      map.set(k, String(v));
+    },
+  };
+  const store = createStore(be);
+  store.load();
+
+  assert.equal(store.migrationReport().readOnly, true);
+  assert.equal(map.get(STORAGE_KEY), raw, "壞掉的那份還在，沒有被丟過的版本蓋掉");
+
+  // 之後的編輯也不落地
+  store.addGoal({title: "新目標"});
+  assert.equal(map.get(STORAGE_KEY), raw);
+});
+
+test("既有快照是更早的另一份時不覆蓋，也不覆寫現有 v2", () => {
+  const damaged = {
+    version: 2, profile: {}, cores: [], skills: [], goals: [], steps: [],
+    xpLog: [{id: "x1", date: "壞", skillId: null, xp: 1, source: "step"}],
+    achievements: [], meta: {},
+  };
+  const be = backend({[STORAGE_KEY]: damaged, [DAMAGED_KEY]: {version: 2, note: "更早那份"}});
+  const before = JSON.stringify(be.raw(STORAGE_KEY));
+  const store = createStore(be);
+  store.load();
+
+  assert.equal(store.migrationReport().readOnly, true);
+  assert.deepEqual(be.raw(DAMAGED_KEY), {version: 2, note: "更早那份"});
+  assert.equal(JSON.stringify(be.raw(STORAGE_KEY)), before);
+});

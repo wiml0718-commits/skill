@@ -293,3 +293,29 @@ test("重複的 legacy 核心 id 兩筆都留下，技能仍指向第一筆", ()
   assert.equal(out.report.skippedCores, 0, "沒有任何一筆被去重吃掉");
   assert.equal(out.report.suffixedIds >= 1, true);
 });
+
+test("剛好用滿 64 字元的核心 id 撞在一起時兩筆都留得住", () => {
+  const long = "c".repeat(64);
+  const out = migrateV1({pwa: {
+    cores: [{id: long, name: "第一個"}, {id: long, name: "第二個"}],
+    subSkills: [],
+  }});
+  assert.equal(out.data.cores.length, 2, "加了後綴也不能超過長度上限而被丟掉");
+  assert.equal(out.data.cores[0].id, long);
+  assert.equal(out.data.cores[1].id.length <= 64, true);
+  assert.notEqual(out.data.cores[1].id, long);
+  assert.equal(out.report.skippedCores, 0);
+});
+
+test("遷移時被模型濾掉的筆記與打卡日期會計入損失", () => {
+  const out = migrateV1({pwa: {
+    cores: [{id: "body", name: "身體"}],
+    subSkills: [{id: 1, coreId: "body", name: "重訓", type: "active", xp: 10,
+                 notes: [{id: 1, text: "留得住"}, {id: 2, text: ""}]}],
+    quests: [{id: 9, title: "冥想", type: "daily",
+              streakHistory: ["2026-08-20", "不是日期"], rewards: []}],
+  }});
+  assert.equal(out.report.droppedNotes, 1, "空白內容的筆記被濾掉了");
+  assert.equal(out.report.droppedStreakDays, 1);
+  assert.equal(reportTotal(out.report) >= 2, true);
+});
