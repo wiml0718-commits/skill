@@ -384,9 +384,12 @@ const DEFAULT_SUBS = [
   {id:10,coreId:"lead",  name:"目標設定",type:"active", xp:55, icon:"🎯",desc:"OKR框架應用",notes:[],source:""},
 ];
 
-let state = {charName:"冒險者", subSkills:[...DEFAULT_SUBS]};
+let state = {charName:"冒險者", subSkills:[], quests:[], cores:[...CORES]};
+
+// 資料一律經由 src/store.js 存取，這裡不再直接碰 localStorage。store 內部是
+// schema v2，legacyState() / saveLegacyState() 負責投影成這個檢視認得的形狀。
 function loadState(){
-  try{const r=localStorage.getItem(STORAGE_KEY);if(r)state=JSON.parse(r);}catch{}
+  state=window.Goals.legacyState();
 }
 let saveTimer;
 function saveState(silent=false){
@@ -394,7 +397,7 @@ function saveState(silent=false){
   saveTimer=setTimeout(()=>{
     // Always persist current CORES state
     if(!state.cores)state.cores=[...CORES];
-    try{localStorage.setItem(STORAGE_KEY,JSON.stringify(state));}catch{}
+    try{window.Goals.saveLegacyState(state);}catch{}
     if(!silent)showToast("✓ 已儲存");
   },600);
 }
@@ -494,7 +497,8 @@ function render(){
     </div>`;
   }
   // 提醒與 badge 依當前資料重算。refresh 內部自行吞錯，不會影響渲染。
-  if(window.Reminders)window.Reminders.refresh(state.quests);
+  // 任務已經統一成 steps，再把 quests 傳進去會讓同一件事被算兩次
+  if(window.Reminders)window.Reminders.refresh();
 }
 
 // ── Core List ─────────────────────────────────────────────────────────────────
@@ -513,7 +517,7 @@ function renderCoreList(){
     const quickRow=activeSubs.length>0
       ?`<div style="display:flex;gap:5px;margin-top:9px;flex-wrap:wrap" onclick="event.stopPropagation()">
           ${activeSubs.map(s=>`
-            <button onclick="quickAddXP(${s.id})"
+            <button onclick="quickAddXP('${s.id}')"
               style="background:${c.color}15;border:1px solid ${c.color}44;color:${c.color};
               border-radius:7px;padding:4px 9px;cursor:pointer;font-size:10px;
               font-family:'Share Tech Mono',monospace;white-space:nowrap">
@@ -569,12 +573,12 @@ function renderDetail(coreId){
       const subLv=Math.min(calcLv(s.xp),SUB_MAX_LV);
       const pct2=subLv<SUB_MAX_LV?Math.min((s.xp-LEVEL_XP[subLv])/(LEVEL_XP[subLv+1]-LEVEL_XP[subLv])*100,100):100;
       const quickBtn=s.type==="active"
-        ?`<button onclick="event.stopPropagation();quickAddXP(${s.id})"
+        ?`<button onclick="event.stopPropagation();quickAddXP('${s.id}')"
             style="flex-shrink:0;background:${tc}22;border:1px solid ${tc}66;color:${tc};
             border-radius:8px;padding:6px 10px;cursor:pointer;font-size:12px;font-weight:700;
             font-family:'Cinzel',serif;line-height:1">+10</button>`
         :"";
-      return `<div class="sub-card" onclick="editSub(${s.id})">
+      return `<div class="sub-card" onclick="editSub('${s.id}')">
         <div class="sub-row">
           <div class="sub-icon">${s.icon}</div>
           <div style="flex:1;min-width:0">
@@ -762,15 +766,13 @@ async function toggleReminders(){
 }
 
 function exportData(){
-  const payload={...state};
-  if(window.Goals){
-    payload.goalsData=window.Goals.exportPayload();
-  }else if(!confirm(
-    "目標模組尚未載入，這份備份不會包含目標與步驟。\n"+
-    "（以 file:// 直接開啟時模組無法載入，請改用網址開啟）\n\n"+
-    "仍要匯出不完整的備份嗎？")){
-    return; // 寧可不給備份，也不要給一份看起來成功、實際缺資料的檔案
+  if(!window.Goals){
+    // 寧可不給備份，也不要給一份看起來成功、實際缺資料的檔案
+    alert("資料模組尚未載入，無法匯出。\n（以 file:// 直接開啟時模組無法載入，請改用網址開啟）");
+    return;
   }
+  // 所有資料現在都在同一份 schema v2 裡，匯出就是它本身
+  const payload=window.Goals.exportPayload();
   const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});
   const a=document.createElement("a");a.href=URL.createObjectURL(blob);
   a.download="skill-tree-backup.json";a.click();
@@ -781,32 +783,18 @@ function importData(e){
   reader.onload=ev=>{
     try{
       const d=JSON.parse(ev.target.result);
-      // Validate required fields
       if(!d||typeof d!=="object")throw new Error("非物件格式");
-      if(!d.charName||typeof d.charName!=="string")throw new Error("缺少 charName");
-      if(!Array.isArray(d.subSkills))throw new Error("缺少 subSkills 陣列");
-      // Validate each subSkill has minimal required fields
-      for(const s of d.subSkills){
-        if(typeof s.id==="undefined"||!s.coreId||!s.name)throw new Error("子技能資料格式不正確");
+      if(!window.Goals){
+        throw new Error("資料模組尚未載入，已中止以免只還原一部分");
       }
-      // Migration: ensure quests array exists
-      if(!d.quests)d.quests=[];
-      // Migration: ensure all daily quests have streakHistory
-      d.quests.forEach(q=>{
-        if(q.type==="daily"&&!q.streakHistory)q.streakHistory=[];
-      });
-      // Migration: ensure all subSkills have notes array
-      d.subSkills.forEach(s=>{if(!s.notes)s.notes=[];});
-      // Goals 資料由 src/store.js 自行保管，抽出後再存回 state
-      const goalsData=d.goalsData;
-      delete d.goalsData;
-      // 備份含目標資料但模組沒載入時整筆中止，不要只還原一半卻回報成功
-      if(goalsData&&!window.Goals){
-        throw new Error("備份包含目標資料，但目標模組尚未載入，已中止以免只還原一部分");
-      }
-      if(goalsData)window.Goals.importPayload(goalsData);
-      state=d;
-      saveState(true);render();showToast("✓ 匯入成功");
+      const isV2=Array.isArray(d.cores)&&Array.isArray(d.skills);
+      const isV1=typeof d.charName==="string"&&Array.isArray(d.subSkills);
+      if(!isV2&&!isV1)throw new Error("認不得的備份格式");
+      // store 認得 v1 與 v2，兩者走同一條轉換路徑
+      window.Goals.importPayload(d);
+      loadState();
+      if(state.cores)syncCores();
+      render();showToast("✓ 匯入成功");
     }catch(err){
       alert(`匯入失敗：${err.message||"檔案格式不正確"}`);
     }
@@ -983,7 +971,7 @@ function confirmMerge(fromCoreId){
     return `・${s.icon||"⭐"}${s.name}（EXP ${s.xp||0}${bookPart}）${descPart}`;
   }).join("\n");
   const mergeRecord={
-    id:Date.now()-1,
+    id:"n_"+(Date.now()-1),
     text:`⚗ 合併自：\n${sourceLines}\n　合計 EXP ${totalXP}`,
     date:today
   };
@@ -1004,7 +992,7 @@ function confirmMerge(fromCoreId){
 
   // Create new merged skill
   const newSkill={
-    id:Date.now(),
+    id:"sk_"+Date.now(),
     name,icon,
     desc:combinedDesc,
     type,
@@ -1041,9 +1029,9 @@ function renderModal(){
     <div class="note-item" id="note-${n.id}">
       <div style="flex:1;min-width:0">
         <div class="note-text ${isLong?"collapsed":""}" id="ntext-${n.id}">${n.text}<span class="note-date">${n.date}</span></div>
-        ${isLong?`<span class="note-toggle" onclick="toggleNote(${n.id})" id="ntoggle-${n.id}">▼ 展開</span>`:""}
+        ${isLong?`<span class="note-toggle" onclick="toggleNote('${n.id}')" id="ntoggle-${n.id}">▼ 展開</span>`:""}
       </div>
-      <button class="note-del" onclick="delNote(${n.id})">✕</button>
+      <button class="note-del" onclick="delNote('${n.id}')">✕</button>
     </div>`;}).join("");
 
   const overlay=document.createElement("div");
@@ -1107,7 +1095,7 @@ function renderModal(){
           onclick="saveSub()">
           ${modalData.mode==="add"?"✦ 習得技能":"儲存"}
         </button>
-        ${modalData.mode==="edit"?`<button class="btn-del" onclick="deleteSub(${d.id})">刪除</button>`:""}
+        ${modalData.mode==="edit"?`<button class="btn-del" onclick="deleteSub('${d.id}')">刪除</button>`:""}
       </div>
     </div>`;
   document.body.appendChild(overlay);
@@ -1130,16 +1118,16 @@ function addXP(v){
 function addNote(){
   const el=document.getElementById("note-input");
   const txt=el?.value?.trim();if(!txt||!modalData)return;
-  const note={id:Date.now(),text:txt,date:new Date().toLocaleDateString("zh-TW")};
+  const note={id:"n_"+Date.now(),text:txt,date:new Date().toLocaleDateString("zh-TW")};
   modalData.data.notes.push(note);
   const list=document.getElementById("notes-list");
   const isLong=txt.length>70||txt.includes("\n");
   const div=document.createElement("div");div.className="note-item";div.id=`note-${note.id}`;
   div.innerHTML=`<div style="flex:1;min-width:0">
       <div class="note-text ${isLong?"collapsed":""}" id="ntext-${note.id}">${note.text}<span class="note-date">${note.date}</span></div>
-      ${isLong?`<span class="note-toggle" onclick="toggleNote(${note.id})" id="ntoggle-${note.id}">▼ 展開</span>`:""}
+      ${isLong?`<span class="note-toggle" onclick="toggleNote('${note.id}')" id="ntoggle-${note.id}">▼ 展開</span>`:""}
     </div>
-    <button class="note-del" onclick="delNote(${note.id})">✕</button>`;
+    <button class="note-del" onclick="delNote('${note.id}')">✕</button>`;
   list.appendChild(div);el.value="";
 }
 function toggleNote(id){
@@ -1171,7 +1159,7 @@ function saveSub(){
   if(d.id){
     state.subSkills=state.subSkills.map(s=>s.id===d.id?{...d}:s);
   }else{
-    state.subSkills.push({...d,id:Date.now()});
+    state.subSkills.push({...d,id:"sk_"+Date.now()});
   }
   const newLv=calcLv(getCoreXP(d.coreId));
   saveState();closeModal();render();
@@ -1461,7 +1449,7 @@ function renderQuestCard(q, now){
     ?`<span style="font-size:9px;color:var(--muted2)">📌 ${new Date(q.createdAt).toLocaleDateString("zh-TW",{year:"numeric",month:"numeric",day:"numeric"})}</span>`
     :"";
 
-  return `<div class="quest-card ${cardDone?"done":""} ${isOverdue?"overdue":""}" onclick="openEditQuest(${q.id})">
+  return `<div class="quest-card ${cardDone?"done":""} ${isOverdue?"overdue":""}" onclick="openEditQuest('${q.id}')">
     <div style="position:absolute;top:0;left:0;width:3px;height:100%;background:${qt.color};border-radius:12px 0 0 12px"></div>
     <div style="padding-left:6px">
       <div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px">
@@ -1480,23 +1468,23 @@ function renderQuestCard(q, now){
           ${rewardHtml}
           ${dueHtml}
           ${q.dueDate&&!q.done&&!q.archived?`<button
-            onclick="event.stopPropagation();downloadICS(${q.id})"
+            onclick="event.stopPropagation();downloadICS('${q.id}')"
             style="align-self:flex-start;margin-top:3px;background:#a855f718;border:1px solid #a855f755;
             color:#a855f7;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:9px;
             font-family:'Share Tech Mono',monospace">📅 加入日曆</button>`:""}
         </div>
         ${q.done&&!q.archived?`<button class="quest-complete-btn"
           style="background:#f59e0b18;border:1px solid #f59e0b55;color:#f59e0b"
-          onclick="event.stopPropagation();archiveQuest(${q.id})">📦 封存</button>`:""}
+          onclick="event.stopPropagation();archiveQuest('${q.id}')">📦 封存</button>`:""}
         ${q.archived?`<button class="quest-complete-btn"
           style="background:#22d3ee18;border:1px solid #22d3ee55;color:#22d3ee"
-          onclick="event.stopPropagation();unarchiveQuest(${q.id})">↩ 取消封存</button>`:""}
+          onclick="event.stopPropagation();unarchiveQuest('${q.id}')">↩ 取消封存</button>`:""}
         ${!q.done&&!q.archived?`<button class="quest-complete-btn"
           style="background:${completeBtnDisabled?"#1e3a4a":qt.color+"22"};
           border:1px solid ${completeBtnDisabled?"#2a4a6a":qt.color+"66"};
           color:${completeBtnDisabled?"var(--muted)":qt.color};
           opacity:${completeBtnDisabled?0.5:1}"
-          onclick="event.stopPropagation();completeQuest(${q.id})">
+          onclick="event.stopPropagation();completeQuest('${q.id}')">
           ${isDailyDone?"明日再來":"✓ 完成"}</button>`:""}
       </div>
     </div>
@@ -1626,7 +1614,7 @@ function showQuestModal(q){
           onclick="saveQuest()">
           ${isNew?"✦ 新增任務":"儲存"}
         </button>
-        ${!isNew?`<button class="btn-del" onclick="deleteQuest(${q.id})">刪除</button>`:""}
+        ${!isNew?`<button class="btn-del" onclick="deleteQuest('${q.id}')">刪除</button>`:""}
       </div>
     </div>`;
   document.body.appendChild(overlay);
@@ -1679,7 +1667,7 @@ function refreshSkillSelect(){
 function addRewardSkillFromSelect(){
   const sel=document.getElementById("skill-pick-select");
   if(!sel||!sel.value)return;
-  const skillId=parseInt(sel.value);
+  const skillId=sel.value;
   if(_modalRewards.find(r=>r.skillId===skillId))return;
   _modalRewards.push({skillId,xp:50});
   renderRewardList();
@@ -1724,7 +1712,7 @@ function saveQuest(){
     }
   } else {
     state.quests.push({
-      id:Date.now(),title,type,desc,dueDate,dueTime,rewards,
+      id:"q_"+Date.now(),title,type,desc,dueDate,dueTime,rewards,
       rewardSkillId:rewards[0]?.skillId||null,rewardXP:rewards[0]?.xp||50,
       done:false,completedAt:null,completedCount:0,lastCompletedDate:null,
       createdAt:new Date().toISOString(),
@@ -1861,17 +1849,43 @@ function _onVisible(){
   if(!document.hidden){render();checkOverdue();}
 }
 
-loadState();
-if(state.cores)syncCores();
-checkOverdue();
-render();
+// 資料層在 src/ 的 module 裡，module script 是 deferred，會在這段 inline script
+// 跑完之後才執行。所以啟動要等它就位，由它回頭呼叫 boot()。
+function boot(){
+  loadState();
+  if(state.cores)syncCores();
+  const r=window.Goals.migrationReport();
+  // 只有全新安裝才給預設技能，而且立刻落地。若改用「技能是空的就補預設」，
+  // 使用者把技能全部刪光之後重開，這批預設會自己長回來。
+  if(r.fresh&&!state.subSkills.length){
+    state.subSkills=DEFAULT_SUBS.map(s=>({...s,id:"sk_"+s.id,notes:[]}));
+    window.Goals.saveLegacyState(state);
+  }
+  if(r.migrated){
+    showToast(r.total>0
+      ?`✓ 資料已升級（${r.total} 筆無法解析已跳過）`
+      :"✓ 資料已升級",r.total>0?4000:2000);
+  }
+  checkOverdue();
+  render();
+}
+window.boot=boot;
+
+// 模組沒載入就沒有資料層。顯示一份空白的預設資料會讓人以為資料不見了，
+// 不如直接說清楚原因。
+document.getElementById("content").innerHTML=
+  `<div style="padding:40px 20px;text-align:center;color:var(--muted);font-size:13px">
+     資料模組載入中…<br><br>
+     <span style="font-size:11px">若一直停在這裡，代表是以 file:// 直接開啟；
+     請改用網址（http / https）開啟。</span>
+   </div>`;
 </script>
 <script type="module">
-// 目標 / 下一步的資料模型與檢視。module script 是 deferred，會在上面的
-// inline script 跑完之後才執行，所以掛載完要再重繪一次。
+// 資料模型與目標檢視。install() 會載入 store（必要時跑一次 v1 → v2 遷移），
+// 之後才輪到上面的 inline script 啟動。
 import {install} from "./src/views.js";
 install();
-if(typeof window.render==="function")window.render();
+if(typeof window.boot==="function")window.boot();
 </script>
 </body>
 </html>

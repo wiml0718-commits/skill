@@ -343,6 +343,12 @@ const api = {
   // 與既有的備份匯出 / 匯入串接
   exportPayload(){return store.toJSON();},
   importPayload(data){store.replaceAll(data);},
+
+  // index.html 的內嵌 script 仍以 legacy 形狀工作，透過這兩個方法讀寫 store，
+  // 不再直接碰 localStorage。UI 的統一是 PR 3 的事。
+  legacyState(){return store.legacyState();},
+  saveLegacyState(state){return store.saveLegacyState(state);},
+  migrationReport(){return store.migrationReport();},
 };
 
 // 事件委派：#content 這個元素本身在每次 render 都存在（只有 innerHTML 被換掉），
