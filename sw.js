@@ -1,6 +1,7 @@
-const CACHE = "skill-tree-v4";
+const CACHE = "skill-tree-v5";
 const ASSETS = ["./index.html", "./manifest.json",
-  "./src/model.js", "./src/store.js", "./src/views.js", "./src/reminders.js"];
+  "./src/model.js", "./src/store.js", "./src/views.js", "./src/reminders.js",
+  "./src/migrate.js"];
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));
   self.skipWaiting();

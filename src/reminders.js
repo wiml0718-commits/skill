@@ -5,7 +5,7 @@
 // Notification Triggers（預約未來時間的本地通知）。因此提醒只在 app 開啟或
 // 回到前景時更新——badge 會留在圖示上直到下次開啟，但通知不是背景鬧鐘。
 
-import {isActionable, GOAL_STATUS} from "./model.js";
+import {isActionable, GOAL_STATUS, STEP_KIND} from "./model.js";
 
 export const DUE = {OVERDUE: "overdue", TODAY: "today", LATER: "later", NONE: "none"};
 
@@ -33,9 +33,11 @@ export function stepsInScope(steps, goals){
   return (steps || []).filter(s => s && (s.goalId == null || active.has(s.goalId)));
 }
 
-// Step：完成與筆記不需要行動，所以不提醒
+// Step：完成與筆記不需要行動，所以不提醒；封存的已經不在清單上，也不該提醒。
+// 每日習慣沒有「到期」的概念，即使帶了日期也不計入。
 export function pendingSteps(steps){
-  return (steps || []).filter(s => s && s.due && isActionable(s.state));
+  return (steps || []).filter(s =>
+    s && s.due && !s.archived && s.kind !== STEP_KIND.DAILY && isActionable(s.state));
 }
 
 // Quest：每日習慣沒有到期日的概念；完成與封存的不提醒
