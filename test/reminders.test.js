@@ -1,13 +1,11 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
 import * as r from "../src/reminders.js";
-import {STEP_STATE} from "../src/model.js";
+import {STEP_STATE, STEP_KIND} from "../src/model.js";
 
 const TODAY = "2026-08-24";
 const step = (id, due, state = STEP_STATE.TODO) =>
   ({id, goalId: "g1", title: `step ${id}`, due, order: 0, state});
-const quest = (id, dueDate, extra = {}) =>
-  ({id, title: `quest ${id}`, type: "main", dueDate, done: false, archived: false, ...extra});
 
 test("todayISO 走邏輯日：本地時區、日界凌晨 4:00", () => {
   // UTC+8 的深夜：toISOString() 會給前一天，本地日期才是正確的
@@ -42,16 +40,16 @@ test("pendingSteps 只留還需要行動且有到期日的", () => {
   assert.deepEqual(r.pendingSteps(steps).map(s => s.id), ["s1", "s5", "s6"]);
 });
 
-test("pendingQuests 排除完成、封存與每日習慣", () => {
-  const quests = [
-    quest("q1", "2026-08-23"),
-    quest("q2", "2026-08-23", {done: true}),
-    quest("q3", "2026-08-23", {archived: true}),
-    quest("q4", "2026-08-23", {type: "daily"}),
-    quest("q5", ""),
-    quest("q6", "2026-08-23", {type: "side"}),
+test("pendingSteps 排除完成、封存與每日習慣", () => {
+  const steps = [
+    step("s1", "2026-08-23"),
+    step("s2", "2026-08-23", STEP_STATE.DONE),
+    {...step("s3", "2026-08-23"), archived: true},
+    {...step("s4", "2026-08-23"), kind: STEP_KIND.DAILY},
+    step("s5", null),
+    {...step("s6", "2026-08-23"), kind: STEP_KIND.SIDE},
   ];
-  assert.deepEqual(r.pendingQuests(quests).map(q => q.id), ["q1", "q6"]);
+  assert.deepEqual(r.pendingSteps(steps).map(s => s.id), ["s1", "s6"]);
 });
 
 test("stepsInScope 只留進行中目標的步驟與收件匣項目", () => {
@@ -85,22 +83,21 @@ test("封存目標之後，它的逾期步驟不再計入 badge", () => {
     "封存後不該再替它計數，否則與今日／目標檢視不一致");
 });
 
-test("collectDue 同時涵蓋 Step 與 Quest，只取逾期與今日到期", () => {
+test("collectDue 只取逾期與今日到期", () => {
   const due = r.collectDue({
     steps: [step("s1", "2026-08-20"), step("s2", TODAY), step("s3", "2026-09-01")],
     goals: [{id: "g1", title: "x", why: "", status: "active"}],
-    quests: [quest("q1", "2026-08-19"), quest("q2", TODAY), quest("q3", "2026-12-01")],
     today: TODAY,
   });
-  assert.deepEqual(due.overdue.map(i => i.id), ["s1", "q1"]);
-  assert.deepEqual(due.dueToday.map(i => i.id), ["s2", "q2"]);
-  assert.equal(due.count, 4, "之後才到期的不計入");
-  assert.deepEqual([...new Set(due.items.map(i => i.kind))], ["step", "quest"]);
+  assert.deepEqual(due.overdue.map(i => i.id), ["s1"]);
+  assert.deepEqual(due.dueToday.map(i => i.id), ["s2"]);
+  assert.equal(due.count, 2, "之後才到期的不計入");
+  assert.deepEqual([...new Set(due.items.map(i => i.kind))], ["step"]);
 });
 
 test("collectDue 在沒有資料時回 0，不丟例外", () => {
   assert.equal(r.collectDue({today: TODAY}).count, 0);
-  assert.equal(r.collectDue({steps: [], quests: [], today: TODAY}).count, 0);
+  assert.equal(r.collectDue({steps: [], today: TODAY}).count, 0);
 });
 
 test("summarize 只描述有東西的分類", () => {
@@ -196,9 +193,9 @@ test("createReminders.refresh 回傳當下的到期統計", async () => {
     goals: [{id: "g1", title: "x", why: "", status: "active"}],
   })};
   const rem = r.createReminders(store, r.createPrefs(fakeBackend()));
-  const due = await rem.refresh([quest("q1", "2020-01-01")]);
-  assert.equal(due.count, 2);
-  assert.deepEqual(due.overdue.map(i => i.id), ["s1", "q1"]);
+  const due = await rem.refresh();
+  assert.equal(due.count, 1);
+  assert.deepEqual(due.overdue.map(i => i.id), ["s1"]);
 });
 
 test("status 反映偏好與環境能力", () => {

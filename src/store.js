@@ -7,7 +7,8 @@ import {migrateV1, emptyReport, reportTotal, hasMergeNote, normalizeLegacyNotes,
         countSkillDrops, countStepDrops} from "./migrate.js";
 // XP 的規則與「今天」都住在 rpg.js：store 只負責套用結果並落地（§4、§5.0）。
 import {logicalToday, resolveGrants, compressXpLog, canBackfill,
-        countsAsActivity, BACKFILL_DAYS} from "./rpg.js";
+        countsAsActivity, hasAttribution, requiresAttribution,
+        BACKFILL_DAYS} from "./rpg.js";
 
 export const STORAGE_KEY = "skill-rpg-v2";
 export const SCHEMA_VERSION = 2;
@@ -207,48 +208,13 @@ function updatePeaks(data, today){
 }
 
 // ── legacy 投影 ──────────────────────────────────────────────────────────────
-// index.html 的內嵌 script 仍以 {charName, cores, subSkills, quests} 的形狀工作。
-// 這一層把 v2 投影成那個形狀再投影回來，讓 UI 不必直接碰 storage，也不需要在
-// 這個 PR 就整份重寫（UI 的統一是 PR 3 的事）。
-
-// quest 來源的步驟：沒有目標、也不是收件匣。Goal/Step 層的項目不在這個集合裡，
-// 所以 legacy 存檔不會動到它們。
-function isQuestStep(s){
-  return s.goalId === null && s.kind !== model.STEP_KIND.INBOX;
-}
-
-const LEGACY_TYPE = {
-  [model.STEP_KIND.MAIN]: "main",
-  [model.STEP_KIND.SIDE]: "side",
-  [model.STEP_KIND.DAILY]: "daily",
-};
+// index.html 的內嵌 script 仍以 {charName, cores, subSkills} 的形狀管理角色與
+// 技能。任務已經統一走 steps，不再有 quest 投影（§8）。
 
 function coerceId(raw, prefix){
   if(typeof raw === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(raw)) return raw;
   const part = String(raw ?? "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 48);
   return part ? `${prefix}_${part}` : "";
-}
-
-function toLegacyQuest(s){
-  return {
-    id: s.id,
-    title: s.title,
-    type: LEGACY_TYPE[s.kind] || "side",
-    desc: s.desc,
-    dueDate: s.due || "",
-    dueTime: s.dueTime || "",
-    rewards: s.rewards.map(r => ({...r})),
-    rewardSkillId: s.rewards[0] ? s.rewards[0].skillId : null,
-    rewardXP: s.rewards[0] ? s.rewards[0].xp : 50,
-    done: s.state === model.STEP_STATE.DONE,
-    completedAt: s.completedAt,
-    completedCount: s.completedCount,
-    lastCompletedDate: s.lastCompletedDate,
-    createdAt: s.createdAt,
-    streakHistory: [...s.streakHistory],
-    archived: s.archived,
-    archivedAt: s.archivedAt,
-  };
 }
 
 function toLegacySkill(s){
@@ -273,10 +239,6 @@ function convert(raw){
     : sanitize(raw);
   return {...out, looksV1};
 }
-
-const KIND_FROM_LEGACY = {main: model.STEP_KIND.MAIN,
-                          side: model.STEP_KIND.SIDE,
-                          daily: model.STEP_KIND.DAILY};
 
 export function createStore(backend = defaultBackend()){
   let data = emptyData();
@@ -352,6 +314,24 @@ export function createStore(backend = defaultBackend()){
     for(const g of resolveGrants(step, {goals: data.goals, skills: data.skills})){
       grant(g, {date, source: model.XP_SOURCE.STEP, refId: step.id});
     }
+  }
+
+  // 歸屬是 main / side / daily 儲存前的必要條件（§4.3）。擋在這裡而不是只擋在
+  // UI，是因為之後每一條寫入路徑都會經過 store。
+  function requireAttribution(step){
+    if(!requiresAttribution(step)) return;
+    if(hasAttribution(step, data.goals)) return;
+    throw new Error("要先指定 XP 歸屬：選一個技能獎勵，或讓所屬目標綁定核心");
+  }
+
+  // 指定核心時，XP 記到該核心的承接技能（§4.3）。核心不存在就不要編一個出來。
+  function rewardForCore(coreId, step){
+    if(!data.cores.some(c => c.id === coreId)) throw new Error(`找不到 core：${coreId}`);
+    const skillId = model.generalSkillId(coreId);
+    findSkill(skillId);
+    const xp = Number.isSafeInteger(step.xp) && step.xp >= 0
+      ? step.xp : model.KIND_DEFAULT_XP[step.kind];
+    return {skillId, xp};
   }
 
   // 每日任務的一次打卡：完成與補登共用同一條路徑，差別只在日期（§5.1）。
@@ -512,23 +492,78 @@ export function createStore(backend = defaultBackend()){
     setGoalStatus(id, status){return store.updateGoal(id, {status});},
 
     // ── Step ────────────────────────────────────────────────────────────────
-    addStep({goalId = null, kind, title, due = null, desc = "", xp,
-             rewards} = {}){
+    addStep({goalId = null, kind, title, due = null, dueTime = null, desc = "",
+             xp, rewards} = {}){
       if(goalId !== null) findGoal(goalId);
       const k = kind || (goalId === null ? model.STEP_KIND.INBOX : model.STEP_KIND.MAIN);
       const step = model.createStep({
-        goalId, kind: k, title, due, desc, xp, rewards,
+        goalId, kind: k, title, due, dueTime, desc, xp, rewards,
+        createdAt: new Date().toISOString(),
         order: model.nextOrder(data.steps, k === model.STEP_KIND.INBOX ? null : goalId),
       });
+      requireAttribution(step);
       data.steps = [...data.steps, step];
       commit();
       return copyStep(step);
     },
 
-    // 完成即發放 XP（§4.2）。每日任務不進 DONE，改記 streak（§5.1）。
-    completeStep(id){
+    // 編輯。歸屬是儲存前的必要條件，改壞了同樣擋下來（§4.3）。
+    updateStep(id, patch = {}){
       const i = findStep(id);
-      const step = data.steps[i];
+      const prev = data.steps[i];
+      if(patch.goalId !== undefined && patch.goalId !== null) findGoal(patch.goalId);
+      const step = model.createStep({...prev, ...patch, id});
+      requireAttribution(step);
+      return replaceStep(i, step);
+    },
+
+    deleteStep(id){
+      const i = findStep(id);
+      const gone = data.steps[i];
+      data.steps = data.steps.filter((s, n) => n !== i);
+      commit();
+      return copyStep(gone);
+    },
+
+    // 封存與 state 正交：只決定顯不顯示在清單裡，不改變完成或放棄（§3.5）。
+    archiveStep(id, on = true){
+      const i = findStep(id);
+      return replaceStep(i, {...data.steps[i], archived: on === true,
+                             archivedAt: on === true ? new Date().toISOString() : null});
+    },
+
+    // 批次封存 / 清除。daily 不進 DONE，所以不會落進這兩個集合。
+    archiveDoneSteps(){
+      const at = new Date().toISOString();
+      let count = 0;
+      data.steps = data.steps.map(s => {
+        if(s.state !== model.STEP_STATE.DONE || s.archived) return s;
+        count += 1;
+        return {...s, archived: true, archivedAt: at};
+      });
+      commit();
+      return count;
+    },
+
+    deleteSteps(pred){
+      const before = data.steps.length;
+      data.steps = data.steps.filter(s => !pred(copyStep(s)));
+      commit();
+      return before - data.steps.length;
+    },
+
+    // 完成即發放 XP（§4.2）。每日任務不進 DONE，改記 streak（§5.1）。
+    // 收件匣是唯一沒有事先歸屬的 kind，完成時才要求指定核心（§4.3），
+    // 沒指定就不完成——這個摩擦只發生在真的要記分的那一刻。
+    completeStep(id, {coreId = null} = {}){
+      const i = findStep(id);
+      let step = data.steps[i];
+      if(step.kind === model.STEP_KIND.INBOX
+         && !hasAttribution(step, data.goals)){
+        if(!coreId) throw new Error("完成前要先指定這筆 XP 歸到哪個核心");
+        step = {...step, rewards: [rewardForCore(coreId, step)]};
+        data.steps = data.steps.map((s, n) => (n === i ? step : s));
+      }
       const today = logicalToday();
       if(step.kind === model.STEP_KIND.DAILY) return markDaily(i, today);
       // 已經完成的不重複發放：重按一次不該再給一份 XP。
@@ -576,17 +611,21 @@ export function createStore(backend = defaultBackend()){
       return replaceStep(i, model.scheduleStep(data.steps[i], due));
     },
 
-    // 收件匣項目歸入目標時轉成主線並排到最後，不插隊搶走現有的下一步
+    // 收件匣項目歸入目標時轉成主線並排到最後，不插隊搶走現有的下一步。
+    // 指派之後就不再是收件匣，因此歸屬必須當場成立：沿用該目標的 coreId，
+    // 目標沒綁核心也沒有 rewards 時擋下來（§4.3）。
     assignStep(id, goalId){
       const i = findStep(id);
       if(goalId !== null) findGoal(goalId);
       const kind = goalId === null ? model.STEP_KIND.INBOX : model.STEP_KIND.MAIN;
-      return replaceStep(i, model.createStep({
+      const step = model.createStep({
         ...data.steps[i],
         goalId,
         kind,
         order: model.nextOrder(data.steps.filter(s => s.id !== id), goalId),
-      }));
+      });
+      requireAttribution(step);
+      return replaceStep(i, step);
     },
 
     // ── 手動調整（§4.4）─────────────────────────────────────────────────────
@@ -709,8 +748,6 @@ export function createStore(backend = defaultBackend()){
         cores: data.cores.map(c => ({id:c.id, name:c.name, title:c.title,
                                      icon:c.icon, color:c.color})),
         subSkills: data.skills.filter(s => !s.builtin).map(toLegacySkill),
-        quests: data.steps.filter(isQuestStep)
-          .sort((a, b) => a.order - b.order).map(toLegacyQuest),
       };
     },
 
@@ -770,48 +807,6 @@ export function createStore(backend = defaultBackend()){
       data.skills = skills.concat(
         data.skills.filter(s => s.builtin && coreIds.has(s.coreId)));
       const liveSkillIds = new Set(data.skills.map(s => s.id));
-
-      const prevSteps = new Map(data.steps.map(s => [s.id, s]));
-      const kept = data.steps.filter(s => !isQuestStep(s));
-      const usedStepIds = new Set(kept.map(s => s.id));
-      const questSteps = [];
-      (Array.isArray(state.quests) ? state.quests : []).forEach((q, order) => {
-        if(!q || typeof q !== "object") return;
-        const id = coerceId(q.id, "q");
-        if(!id || usedStepIds.has(id)) return;
-        const prev = prevSteps.get(id);
-        const done = q.done === true;
-        try{
-          const step = model.createStep({
-            id,
-            goalId: null,
-            kind: KIND_FROM_LEGACY[q.type] || model.STEP_KIND.SIDE,
-            title: q.title,
-            desc: q.desc,
-            due: q.dueDate || null,
-            dueTime: q.dueTime || null,
-            order,
-            // legacy 只知道 done 或不 done，別的狀態（順延、排程）沿用既有值，
-            // 否則從任務頁存一次就會把它們抹平成待辦。
-            state: done ? model.STEP_STATE.DONE
-                        : (prev && prev.state !== model.STEP_STATE.DONE
-                            ? prev.state : model.STEP_STATE.TODO),
-            deferCount: prev ? prev.deferCount : 0,
-            xp: prev ? prev.xp : undefined,
-            rewards: q.rewards,
-            streakHistory: q.streakHistory,
-            completedCount: q.completedCount,
-            lastCompletedDate: q.lastCompletedDate || null,
-            archived: q.archived === true,
-            archivedAt: q.archived === true ? (q.archivedAt || null) : null,
-            createdAt: q.createdAt || (prev ? prev.createdAt : null),
-            completedAt: q.completedAt || null,
-          });
-          usedStepIds.add(id);
-          questSteps.push(step);
-        }catch{ /* 跳過壞掉的任務 */ }
-      });
-      data.steps = [...questSteps, ...kept];
 
       if(coreRemoved){
         // 指向已移除技能的 reward 一併清掉，不留懸空參照（§3.2）

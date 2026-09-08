@@ -41,20 +41,14 @@ export function pendingSteps(steps){
     s && s.due && !s.archived && s.kind !== STEP_KIND.DAILY && isActionable(s.state));
 }
 
-// Quest：每日習慣沒有到期日的概念；完成與封存的不提醒
-export function pendingQuests(quests){
-  return (quests || []).filter(q =>
-    q && q.dueDate && !q.done && !q.archived && q.type !== "daily");
-}
-
-export function collectDue({steps = [], goals = [], quests = [], today = todayISO()} = {}){
+// 任務已經統一成 steps，不再有第二套 quest 集合要另外掃（§8）。
+export function collectDue({steps = [], goals = [], today = todayISO()} = {}){
   const items = [];
   const take = (kind, id, title, due) => {
     const bucket = classifyDue(due, today);
     if(bucket === DUE.OVERDUE || bucket === DUE.TODAY) items.push({kind, id, title, due, bucket});
   };
   for(const s of pendingSteps(stepsInScope(steps, goals))) take("step", s.id, s.title, s.due);
-  for(const q of pendingQuests(quests)) take("quest", q.id, q.title, q.dueDate);
 
   const overdue = items.filter(i => i.bucket === DUE.OVERDUE);
   const dueToday = items.filter(i => i.bucket === DUE.TODAY);
@@ -169,11 +163,11 @@ export async function showDueNotification(body, count){
 export function createReminders(store, prefs = createPrefs()){
   const api = {
     // 每次 render 都會呼叫，所以必須便宜且不能拋錯
-    async refresh(quests){
+    async refresh(){
       let due;
       try{
         const {steps, goals} = store.getState();
-        due = collectDue({steps, goals, quests});
+        due = collectDue({steps, goals});
       }catch{
         return null;
       }

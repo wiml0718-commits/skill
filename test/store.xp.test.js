@@ -85,22 +85,51 @@ test("重複完成不重複發放", () => {
   assert.equal(logOf(store).length, 1);
 });
 
-test("沒有 rewards 也沒有 goal coreId 時走未歸屬，不計入任何核心等級", () => {
-  const {store} = fresh();
-  const step = store.addStep({kind: m.STEP_KIND.INBOX, title: "隨手記一筆"});
-  store.completeStep(step.id);
+// 遷移進來的 legacy quest：沒有 rewards、也沒有目標可以借 coreId（§4.3.1）。
+// 這種形狀只會從舊資料進來，所以直接從 storage 載入而不是用 addStep 建。
+function withLegacyStep(patch = {}){
+  const be = backend({[STORAGE_KEY]: {
+    version: 2,
+    profile: {charName: "阿維", schemaVersion: 2, createdAt: null, unassignedXP: 0},
+    cores: [{id: "body", name: "身體管理", order: 0, builtin: true},
+            {id: "learn", name: "學習能力", order: 1, builtin: true}],
+    skills: [], goals: [], achievements: [], xpLog: [],
+    meta: {inboxPeak: 0, reviewPeak: 0, activeDays: []},
+    steps: [{id: "s_legacy", goalId: null, kind: "main", title: "舊任務", order: 0,
+             state: "•", rewards: [], ...patch}],
+  }});
+  const store = createStore(be);
+  store.load();
+  return {store, be};
+}
+
+test("遷移進來、沒有歸屬的舊任務完成時走未歸屬，不計入任何核心等級", () => {
+  const {store} = withLegacyStep();
+  store.completeStep("s_legacy");
 
   const state = store.getState();
-  assert.equal(state.profile.unassignedXP, 5, "inbox 預設 5 XP");
-  assert.equal(store.totalLevel(), 9, "未歸屬的 XP 不會讓任何核心升級");
+  assert.equal(state.profile.unassignedXP, 50, "main 預設 50 XP");
+  assert.equal(store.totalLevel(), 2, "未歸屬的 XP 不會讓任何核心升級");
   assert.equal(state.xpLog[0].skillId, null);
-  assert.equal(state.xpLog[0].refId, step.id, "事後要找得回是哪個步驟");
+  assert.equal(state.xpLog[0].refId, "s_legacy", "事後要找得回是哪個步驟");
+});
+
+test("收件匣完成時必須指定核心，沒指定就不完成（§4.3）", () => {
+  const {store} = fresh();
+  const step = store.addStep({kind: m.STEP_KIND.INBOX, title: "隨手記一筆"});
+
+  assert.throws(() => store.completeStep(step.id), /指定這筆 XP 歸到哪個核心/);
+  assert.equal(logOf(store).length, 0, "沒完成就不該留下任何紀錄");
+  assert.equal(store.getState().steps[0].state, m.STEP_STATE.TODO);
+
+  store.completeStep(step.id, {coreId: "learn"});
+  assert.equal(xpOf(store, m.generalSkillId("learn")), 5, "inbox 預設 5 XP");
+  assert.equal(store.getState().profile.unassignedXP, 0, "指定了就不是未歸屬");
 });
 
 test("事後指定核心是更新那一筆，不新增紀錄", () => {
-  const {store} = fresh();
-  const step = store.addStep({kind: m.STEP_KIND.INBOX, title: "待歸屬"});
-  store.completeStep(step.id);
+  const {store} = withLegacyStep();
+  store.completeStep("s_legacy");
   const entryId = logOf(store)[0].id;
 
   const updated = store.assignXpEntry(entryId, "learn");
@@ -109,14 +138,14 @@ test("事後指定核心是更新那一筆，不新增紀錄", () => {
   assert.equal(state.xpLog.length, 1, "總 XP 不能被算兩次");
   assert.equal(updated.skillId, m.generalSkillId("learn"));
   assert.equal(state.profile.unassignedXP, 0);
-  assert.equal(store.coreXp("learn"), 5);
+  assert.equal(store.coreXp("learn"), 50);
   assert.throws(() => store.assignXpEntry(entryId, "body"), /已經歸屬/);
   assert.throws(() => store.assignXpEntry("x_nope", "body"), /找不到 xpLog/);
 
-  const another = store.addStep({kind: m.STEP_KIND.INBOX, title: "再一筆"});
-  store.completeStep(another.id);
-  const pending = logOf(store).find(e => e.skillId === null).id;
-  assert.throws(() => store.assignXpEntry(pending, "core_nope"), /找不到 core/);
+  const {store: other} = withLegacyStep();
+  other.completeStep("s_legacy");
+  const pending = logOf(other).find(e => e.skillId === null).id;
+  assert.throws(() => other.assignXpEntry(pending, "core_nope"), /找不到 core/);
 });
 
 test("goal 綁定核心時，沒有 rewards 的步驟加到承接技能", () => {
@@ -163,7 +192,9 @@ test("每日任務同一天只給一次 XP，也不進 DONE", () => {
 
 test("補登：XP 記在被補登的那一天，超過 3 天就擋下來", () => {
   const {store} = fresh();
-  const step = store.addStep({kind: m.STEP_KIND.DAILY, title: "冥想"});
+  addSkill(store, {id: "sk_a"});
+  const step = store.addStep({kind: m.STEP_KIND.DAILY, title: "冥想",
+                              rewards: [{skillId: "sk_a", xp: 10}]});
   const twoDaysAgo = shiftDays(TODAY, -2);
 
   const after = store.backfillDaily(step.id, twoDaysAgo);
@@ -183,7 +214,9 @@ test("補登：XP 記在被補登的那一天，超過 3 天就擋下來", () =>
 
 test("非每日任務不能補登", () => {
   const {store} = fresh();
-  const step = store.addStep({kind: m.STEP_KIND.SIDE, title: "側寫"});
+  addSkill(store, {id: "sk_a"});
+  const step = store.addStep({kind: m.STEP_KIND.SIDE, title: "側寫",
+                              rewards: [{skillId: "sk_a", xp: 20}]});
   assert.throws(() => store.backfillDaily(step.id, TODAY), /只有每日任務/);
 });
 
@@ -280,7 +313,8 @@ test("activeDays 只收 step 與 manual", () => {
   const {store} = fresh();
   addSkill(store, {id: "sk_a", coreId: "body", xp: 10});
   addSkill(store, {id: "sk_b", coreId: "body", xp: 10});
-  const step = store.addStep({kind: m.STEP_KIND.SIDE, title: "做一件事"});
+  const step = store.addStep({kind: m.STEP_KIND.SIDE, title: "做一件事",
+                              rewards: [{skillId: "sk_a", xp: 5}]});
   store.completeStep(step.id);
   store.adjustSkillXp("sk_a", 10);
   store.mergeSkills({sourceIds: ["sk_a", "sk_b"], coreId: "body", name: "體能"});

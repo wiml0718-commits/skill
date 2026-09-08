@@ -2,10 +2,11 @@
 // 今日 / 目標 / 收件匣三個檢視。資料一律經由 store 取得，不直接碰 localStorage。
 
 import {createStore} from "./store.js";
-import {STEP_STATE, STEP_STATE_LABEL, GOAL_STATUS, hasDeferWarning, DEFER_WARN_THRESHOLD,
-        LEVEL_XP, MAX_LV, calcLv} from "./model.js";
+import {STEP_STATE, STEP_STATE_LABEL, STEP_KIND, GOAL_STATUS, hasDeferWarning,
+        DEFER_WARN_THRESHOLD, LEVEL_XP, MAX_LV, calcLv, calcStreak, shiftDate,
+        KIND_DEFAULT_XP} from "./model.js";
 import {createReminders, todayISO} from "./reminders.js";
-import {lvName, levelProgress} from "./rpg.js";
+import {lvName, levelProgress, BACKFILL_DAYS} from "./rpg.js";
 
 const store = createStore();
 const reminders = createReminders(store);
@@ -21,6 +22,69 @@ function esc(v){
 
 function toast(msg){
   if(typeof window !== "undefined" && typeof window.showToast === "function") window.showToast(msg);
+}
+
+// ── XP 歸屬（§4.3）──────────────────────────────────────────────────────────
+// 歸屬在建立時就要確定，所以這裡是個會擋住流程的提問，不是可略過的提示。
+// 上次選過的核心當預設值：同一批東西通常歸到同一個地方。
+let lastCore = null;
+
+function pickCore(message){
+  const cores = store.getState().cores;
+  if(!cores.length){
+    alert("目前一個核心技能都沒有，請先在技能頁建立一個。");
+    return null;
+  }
+  const menu = cores.map((c, i) => `${i + 1}. ${c.title || c.name}`).join("\n");
+  const fallback = cores.findIndex(c => c.id === lastCore);
+  const def = String((fallback >= 0 ? fallback : 0) + 1);
+  const answer = prompt(`${message}\n${menu}`, def);
+  if(answer === null) return null;
+  const idx = Number(answer.trim()) - 1;
+  if(!Number.isInteger(idx) || idx < 0 || idx >= cores.length){
+    alert("請輸入清單上的編號。");
+    return null;
+  }
+  lastCore = cores[idx].id;
+  return lastCore;
+}
+
+// 目標底下也能放支線與每日，不是只有主線；只有主線參與「下一步」推導（§3.5）。
+const KIND_LABEL = {
+  [STEP_KIND.MAIN]: "主線",
+  [STEP_KIND.SIDE]: "支線",
+  [STEP_KIND.DAILY]: "每日",
+  [STEP_KIND.INBOX]: "收件匣",
+};
+const KIND_ICON = {
+  [STEP_KIND.MAIN]: "⚔️",
+  [STEP_KIND.SIDE]: "🗺️",
+  [STEP_KIND.DAILY]: "🌟",
+  [STEP_KIND.INBOX]: "📥",
+};
+const PICKABLE_KINDS = [STEP_KIND.MAIN, STEP_KIND.SIDE, STEP_KIND.DAILY];
+
+function pickKind(){
+  const menu = PICKABLE_KINDS.map((k, i) => `${i + 1}. ${KIND_ICON[k]} ${KIND_LABEL[k]}`).join("\n");
+  const answer = prompt(`這是哪一種步驟？\n${menu}`, "1");
+  if(answer === null) return null;
+  const idx = Number(answer.trim()) - 1;
+  if(!Number.isInteger(idx) || idx < 0 || idx >= PICKABLE_KINDS.length){
+    alert("請輸入清單上的編號。");
+    return null;
+  }
+  return PICKABLE_KINDS[idx];
+}
+
+// 目標還沒綁核心時，補上再繼續。沒補就不建立步驟——這正是 §4.3 要的摩擦。
+function ensureGoalCore(goalId){
+  const goal = store.getState().goals.find(g => g.id === goalId);
+  if(!goal) return false;
+  if(goal.coreId) return true;
+  const coreId = pickCore(`「${goal.title}」的成果要算到哪個核心？`);
+  if(!coreId) return false;
+  store.updateGoal(goalId, {coreId});
+  return true;
 }
 
 // index.html 的內嵌 script 仍拿著一份 legacy 快照（`state`）。store 這邊改完之後
@@ -58,6 +122,12 @@ function dueLabel(due){
 
 function glyph(state){
   return `<span class="bujo-glyph" title="${esc(STEP_STATE_LABEL[state] || "")}">${esc(state)}</span>`;
+}
+
+// 主線是預設，標出來只會變雜訊；支線與每日才需要一眼看出不參與下一步推導。
+function kindTag(step){
+  if(step.kind === STEP_KIND.MAIN) return "";
+  return `<span class="kind-tag" title="${esc(KIND_LABEL[step.kind] || "")}">${KIND_ICON[step.kind] || ""}</span> `;
 }
 
 // 順延次數只在達到門檻時才顯示——一兩次是常態，顯示出來只會變成雜訊
@@ -108,7 +178,7 @@ function renderGoalCard(goal){
   if(isOpen){
     body = store.goalSteps(goal.id).map(s => `<div class="step-row ${s.state === STEP_STATE.DONE || s.state === STEP_STATE.DROPPED ? "is-done" : ""}">
       ${glyph(s.state)}
-      <span class="step-row-title">${esc(s.title)}${deferTag(s)}</span>
+      <span class="step-row-title">${kindTag(s)}${esc(s.title)}${deferTag(s)}</span>
       ${dueLabel(s.due)}
     </div>`).join("") || `<div class="step-row muted">尚無步驟</div>`;
   }else if(next){
@@ -292,17 +362,27 @@ const api = {
     const title = prompt("目標是什麼？");
     if(!title || !title.trim()) return;
     const why = prompt("為什麼要做這件事？（可留空）") || "";
-    store.addGoal({title, why});
+    const coreId = pickCore("這個目標的成果要算到哪個核心？");
+    if(!coreId) return;
+    store.addGoal({title, why, coreId});
     sub = "goals";
     toast("✓ 已新增目標");
     repaint();
   },
 
   addStep(goalId){
+    if(!ensureGoalCore(goalId)) return;
     const title = prompt("下一步要做什麼？");
     if(!title || !title.trim()) return;
-    store.addStep({goalId, title});
-    toast("✓ 已新增步驟");
+    const kind = pickKind();
+    if(!kind) return;
+    try{
+      store.addStep({goalId, title, kind});
+    }catch(err){
+      alert(err.message);
+      return;
+    }
+    toast(kind === STEP_KIND.MAIN ? "✓ 已新增步驟" : `✓ 已新增${KIND_LABEL[kind]}`);
     repaint();
   },
 
@@ -315,7 +395,25 @@ const api = {
     repaint();
   },
 
-  complete(id){store.completeStep(id); toast("✓ 完成"); repaint();},
+  // 收件匣項目完成前才要求指定歸屬（§4.3）：沒選就不完成。
+  complete(id){
+    try{
+      store.completeStep(id);
+    }catch(err){
+      const step = store.getState().steps.find(s => s.id === id);
+      if(!step || step.kind !== STEP_KIND.INBOX){ alert(err.message); return; }
+      const coreId = pickCore("這次完成的 XP 要算到哪個核心？");
+      if(!coreId) return;
+      try{
+        store.completeStep(id, {coreId});
+      }catch(err2){
+        alert(err2.message);
+        return;
+      }
+    }
+    toast("✓ 完成");
+    repaint();
+  },
 
   defer(id){
     const s = store.deferStep(id);
@@ -342,9 +440,17 @@ const api = {
     }
   },
 
+  // 指派之後就不再是收件匣，歸屬必須當場成立：沿用目標的核心，沒綁就先補上。
   assign(id, goalId){
     if(!goalId) return;
-    store.assignStep(id, goalId);
+    if(!ensureGoalCore(goalId)){ repaint(); return; }
+    try{
+      store.assignStep(id, goalId);
+    }catch(err){
+      alert(err.message);
+      repaint();
+      return;
+    }
     toast("✓ 已歸入目標");
     repaint();
   },
@@ -356,8 +462,29 @@ const api = {
     repaint();
   },
 
+  // ── 任務（§3.5）：index.html 的任務頁透過這裡讀寫統一的 steps ──────────────
+  listSteps(){return store.getState().steps;},
+  listSkills(){return store.getState().skills;},
+  listCores(){return store.getState().cores;},
+  listGoals(){return store.getState().goals;},
+  createStep(spec){return store.addStep(spec);},
+  updateStep(id, patch){return store.updateStep(id, patch);},
+  deleteStep(id){return store.deleteStep(id);},
+  archiveStep(id, on){return store.archiveStep(id, on);},
+  archiveDoneSteps(){return store.archiveDoneSteps();},
+  deleteStepsWhere(pred){return store.deleteSteps(pred);},
+  assignStep(id, goalId){return store.assignStep(id, goalId);},
+  calcStreak,
+  shiftDate,
+  KIND_DEFAULT_XP,
+  BACKFILL_DAYS,
+  // 歸屬的提問只寫一次：任務頁與目標頁走同一個流程（§4.3）
+  pickCore,
+  STEP_KIND,
+  STEP_STATE,
+
   // ── XP 引擎（§4）：index.html 的內嵌 script 不是 module，透過這裡呼叫 ──────
-  completeStep(id){return store.completeStep(id);},
+  completeStep(id, opts){return store.completeStep(id, opts);},
   backfillDaily(id, date){return store.backfillDaily(id, date);},
   adjustSkillXp(skillId, delta){return store.adjustSkillXp(skillId, delta);},
   setSkillXp(skillId, value){return store.setSkillXp(skillId, value);},

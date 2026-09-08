@@ -97,6 +97,20 @@ export function resolveGrants(step, {goals = [], skills = []} = {}){
   return [{skillId: null, xp: amount}];
 }
 
+// 這個步驟能不能回答「XP 要加到哪個技能」（§4.3）。main / side / daily 儲存前
+// 必須為真，否則就是寫下一筆之後才要補救的資料；inbox 是唯一的例外，但延後到
+// 完成或指派時才要求。
+export function hasAttribution(step, goals = []){
+  if(step.rewards && step.rewards.length) return true;
+  if(!step.goalId) return false;
+  const goal = goals.find(g => g.id === step.goalId);
+  return !!(goal && goal.coreId);
+}
+
+export function requiresAttribution(step){
+  return step.kind !== model.STEP_KIND.INBOX;
+}
+
 // ── 補登（§5.1）─────────────────────────────────────────────────────────────
 // 窗口刻意壓短：補登窗口愈長，streak 就愈接近「事後補出來的數字」。
 export const BACKFILL_DAYS = 3;

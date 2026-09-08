@@ -256,6 +256,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 .step-row.is-done{opacity:.45;text-decoration:line-through;}
 .step-row.muted{color:var(--muted2);font-size:11px;justify-content:center;}
 .step-row-title{flex:1;min-width:0;word-break:break-word;}
+.kind-tag{font-size:10px;opacity:.85}
 .bujo-glyph{display:inline-flex;align-items:center;justify-content:center;
   width:20px;height:20px;flex-shrink:0;border-radius:6px;background:var(--bg);
   border:1px solid var(--border2);color:#4a9eff;font-size:12px;line-height:1;}
@@ -339,7 +340,6 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 
 <script>
 // ── Data ─────────────────────────────────────────────────────────────────────
-const STORAGE_KEY = "skill-pwa-v1";
 const SUB_MAX_LV = 9;
 const CORES = [
   {id:"body",    name:"身體管理", title:"John Wick",       icon:"🔫", color:"#ef4444"},
@@ -367,7 +367,7 @@ const DEFAULT_SUBS = [
   {id:10,coreId:"lead",  name:"目標設定",type:"active", xp:55, icon:"🎯",desc:"OKR框架應用",notes:[],source:""},
 ];
 
-let state = {charName:"冒險者", subSkills:[], quests:[], cores:[...CORES]};
+let state = {charName:"冒險者", subSkills:[], cores:[...CORES]};
 
 // 資料一律經由 src/store.js 存取，這裡不再直接碰 localStorage。store 內部是
 // schema v2，legacyState() / saveLegacyState() 負責投影成這個檢視認得的形狀。
@@ -410,24 +410,6 @@ function maxLv(){return window.Goals.MAX_LV;}
 function calcLv(xp){return window.Goals.calcLv(xp);}
 function lvName(lv){return window.Goals.lvName(lv);}
 function lvProgress(xp){return window.Goals.levelProgress(xp);}
-
-// ── Streak helper ─────────────────────────────────────────────────────────────
-function calcStreak(q){
-  // Returns current consecutive days streak for a daily quest
-  if(q.type!=="daily"||!q.streakHistory)return q.completedCount?1:0;
-  let streak=0;
-  const [ty,tm,td]=todayStr().split("-").map(Number);
-  const check=new Date(ty,tm-1,td);
-  // Walk backwards from today
-  for(let i=0;i<365;i++){
-    const d=`${check.getFullYear()}-${String(check.getMonth()+1).padStart(2,"0")}-${String(check.getDate()).padStart(2,"0")}`;
-    if(q.streakHistory.includes(d)){streak++;}
-    else if(i===0){/* today not yet done is ok, keep checking */}
-    else break;
-    check.setDate(check.getDate()-1);
-  }
-  return streak;
-}
 
 function svgRing(xp,color,size=56){
   const r=(size-8)/2,circ=2*Math.PI*r;
@@ -1323,38 +1305,58 @@ if("serviceWorker" in navigator){
 }
 
 
-// ── Quest System ──────────────────────────────────────────────────────────────
-const QUEST_TYPES = {
-  main:  {label:"主線任務", icon:"⚔️", color:"#f59e0b", bg:"#f59e0b"},
-  side:  {label:"支線任務", icon:"🗺️", color:"#22d3ee", bg:"#22d3ee"},
-  daily: {label:"每日任務", icon:"🌟", color:"#10b981", bg:"#10b981"},
+// ── 任務（統一的 steps，§3.5）────────────────────────────────────────────────
+// 任務頁與目標頁讀的是同一份資料：這裡不再有自己的 quest 陣列，一律經由
+// window.Goals 存取 store。kind 取代了 legacy 的 type，state 取代了 done。
+const KIND_META = {
+  main:  {label:"主線任務", icon:"⚔️", color:"#f59e0b"},
+  side:  {label:"支線任務", icon:"🗺️", color:"#22d3ee"},
+  daily: {label:"每日任務", icon:"🌟", color:"#10b981"},
+  inbox: {label:"收件匣",   icon:"📥", color:"#a855f7"},
 };
+const DONE_STATE = "×";
+const ACTIONABLE_STATES = new Set(["•", "<", ">"]);
 
-let questFilter = "all"; // all | main | side | daily | done | archive
+let questFilter = "all"; // all | main | side | daily | inbox | done | archive
+
+function stepMeta(s){return KIND_META[s.kind]||KIND_META.side;}
+function isActionableStep(s){return !s.archived&&ACTIONABLE_STATES.has(s.state);}
+function isDailyDoneToday(s){
+  return s.kind==="daily"&&s.lastCompletedDate===todayStr();
+}
+function stepStreak(s){return window.Goals.calcStreak(s.streakHistory,todayStr());}
+function skillById(id){return window.Goals.listSkills().find(x=>x.id===id)||null;}
+function goalTitle(id){
+  if(!id)return "";
+  const g=window.Goals.listGoals().find(x=>x.id===id);
+  return g?g.title:"";
+}
+function stepById(id){return window.Goals.listSteps().find(s=>s.id===id)||null;}
 
 function renderQuests(){
-  if(!state.quests)state.quests=[];
   // 到期標籤同樣以邏輯日為準（§5.0），否則凌晨 0-4 點卡片會說「逾期 1 天」，
   // 提醒面板與 checkOverdue() 卻說今天到期。
-  const today = todayStr();
+  const today=todayStr();
+  const steps=window.Goals.listSteps();
 
-  // For daily: never truly "done", show all dailies under daily tab
-  const isActive = q => q.type==="daily" ? true : !q.done && !q.archived;
-  const filtered = state.quests.filter(q=>{
-    if(questFilter==="done")    return q.done && q.type!=="daily" && !q.archived;
-    if(questFilter==="archive") return q.archived===true;
-    if(questFilter==="daily")   return q.type==="daily";
-    if(questFilter==="all")     return isActive(q);
-    return isActive(q) && q.type===questFilter;
+  // 每日任務不進 DONE（§5.1），所以「進行中」對它來說永遠成立（除非封存）。
+  const isOpen=s=>s.kind==="daily"?!s.archived:isActionableStep(s);
+  const filtered=steps.filter(s=>{
+    if(questFilter==="done")    return s.state===DONE_STATE&&!s.archived;
+    if(questFilter==="archive") return s.archived===true;
+    if(questFilter==="daily")   return s.kind==="daily"&&!s.archived;
+    if(questFilter==="all")     return isOpen(s);
+    return isOpen(s)&&s.kind===questFilter;
   });
 
   const counts={
-    all:     state.quests.filter(q=>isActive(q)).length,
-    main:    state.quests.filter(q=>!q.done&&!q.archived&&q.type==="main").length,
-    side:    state.quests.filter(q=>!q.done&&!q.archived&&q.type==="side").length,
-    daily:   state.quests.filter(q=>q.type==="daily").length,
-    done:    state.quests.filter(q=>q.done&&q.type!=="daily"&&!q.archived).length,
-    archive: state.quests.filter(q=>q.archived===true).length,
+    all:     steps.filter(isOpen).length,
+    main:    steps.filter(s=>isOpen(s)&&s.kind==="main").length,
+    side:    steps.filter(s=>isOpen(s)&&s.kind==="side").length,
+    daily:   steps.filter(s=>s.kind==="daily"&&!s.archived).length,
+    inbox:   steps.filter(s=>isOpen(s)&&s.kind==="inbox").length,
+    done:    steps.filter(s=>s.state===DONE_STATE&&!s.archived).length,
+    archive: steps.filter(s=>s.archived===true).length,
   };
 
   const tabs=[
@@ -1362,6 +1364,7 @@ function renderQuests(){
     {k:"main",    label:`⚔️ 主線 (${counts.main})`},
     {k:"side",    label:`🗺️ 支線 (${counts.side})`},
     {k:"daily",   label:`🌟 每日 (${counts.daily})`},
+    {k:"inbox",   label:`📥 收件匣 (${counts.inbox})`},
     {k:"done",    label:`✓ 完成 (${counts.done})`},
     {k:"archive", label:`📦 封存 (${counts.archive})`},
   ].map(t=>`<button class="qtab ${questFilter===t.k?"active":""}"
@@ -1374,11 +1377,12 @@ function renderQuests(){
       ${questFilter==="done"?"尚無完成的任務":questFilter==="archive"?"尚無封存的任務":"沒有進行中的任務<br><small>點右下角 + 新增任務</small>"}
     </div>`;
   } else if(questFilter==="archive"){
-    // Sort by completedAt desc, group by year-month
-    const sorted=[...filtered].sort((a,b)=>new Date(b.completedAt||b.createdAt||0)-new Date(a.completedAt||a.createdAt||0));
+    // 依完成時間新到舊排，並依年月分組
+    const sorted=[...filtered].sort((a,b)=>
+      new Date(b.completedAt||b.createdAt||0)-new Date(a.completedAt||a.createdAt||0));
     let lastMonthKey="";
-    cards=sorted.map(q=>{
-      const dateStr=q.completedAt||q.createdAt||"";
+    cards=sorted.map(s=>{
+      const dateStr=s.completedAt||s.createdAt||"";
       const d=dateStr?new Date(dateStr):null;
       const monthKey=d?`${d.getFullYear()}-${d.getMonth()}`:"";
       const monthLabel=d?`${d.getFullYear()} 年 ${d.getMonth()+1} 月`:"";
@@ -1391,45 +1395,43 @@ function renderQuests(){
           <div style="flex:1;height:1px;background:linear-gradient(90deg,transparent,#f59e0b44)"></div>
         </div>`;
       }
-      return divider+renderQuestCard(q,today);
+      return divider+renderQuestCard(s,today);
     }).join("");
   } else if(questFilter==="daily"||questFilter==="all"){
-    // Split daily into undone / done-today
-    const dailyUndone=filtered.filter(q=>q.type==="daily"&&!isDailyDoneToday(q));
-    const dailyDone=filtered.filter(q=>q.type==="daily"&&isDailyDoneToday(q));
-    const others=filtered.filter(q=>q.type!=="daily");
-    const otherCards=others.map(q=>renderQuestCard(q,today)).join("");
-    const undoneCards=dailyUndone.map(q=>renderQuestCard(q,today)).join("");
+    // 每日任務分成今天還沒做 / 今天做完了
+    const dailyUndone=filtered.filter(s=>s.kind==="daily"&&!isDailyDoneToday(s));
+    const dailyDone=filtered.filter(s=>s.kind==="daily"&&isDailyDoneToday(s));
+    const others=filtered.filter(s=>s.kind!=="daily");
+    const otherCards=others.map(s=>renderQuestCard(s,today)).join("");
+    const undoneCards=dailyUndone.map(s=>renderQuestCard(s,today)).join("");
     const doneCards=dailyDone.length>0
       ?`<div style="color:var(--muted);font-size:9px;letter-spacing:2px;margin:14px 0 8px;padding-left:2px">
           ✓ 今日已完成 (${dailyDone.length})
-        </div>${dailyDone.map(q=>renderQuestCard(q,today)).join("")}`
+        </div>${dailyDone.map(s=>renderQuestCard(s,today)).join("")}`
       :"";
     cards=otherCards+undoneCards+doneCards;
   } else {
-    cards=filtered.map(q=>renderQuestCard(q,today)).join("");
+    cards=filtered.map(s=>renderQuestCard(s,today)).join("");
   }
 
-  const doneCnt=state.quests.filter(q=>q.done&&q.type!=="daily"&&!q.archived).length;
-  const archiveCnt=state.quests.filter(q=>q.archived===true).length;
-  const clearBtn=questFilter==="done"&&doneCnt>0
+  const clearBtn=questFilter==="done"&&counts.done>0
     ?`<div style="display:flex;gap:6px;margin-bottom:10px">
         <button onclick="archiveAllDone()"
           style="flex:1;background:#1a1000;border:1px solid #f59e0b55;color:#f59e0b;
           border-radius:8px;padding:9px;cursor:pointer;font-size:11px;font-family:'Share Tech Mono',monospace">
-          📦 全部封存 (${doneCnt})
+          📦 全部封存 (${counts.done})
         </button>
         <button onclick="clearDoneQuests()"
           style="flex:1;background:#1a0808;border:1px solid #ef444455;color:#ef4444;
           border-radius:8px;padding:9px;cursor:pointer;font-size:11px;font-family:'Share Tech Mono',monospace">
-          🗑 全部清除 (${doneCnt})
+          🗑 全部清除 (${counts.done})
         </button>
       </div>`
-    :questFilter==="archive"&&archiveCnt>0
+    :questFilter==="archive"&&counts.archive>0
     ?`<button onclick="clearArchived()"
         style="width:100%;background:#1a0808;border:1px solid #ef444455;color:#ef4444;
         border-radius:8px;padding:9px;cursor:pointer;font-size:11px;margin-bottom:10px;font-family:'Share Tech Mono',monospace">
-        🗑 清除所有封存 (${archiveCnt})
+        🗑 清除所有封存 (${counts.archive})
       </button>`
     :"";
 
@@ -1442,11 +1444,12 @@ function renderQuests(){
     <button class="quest-add-fab" onclick="openAddQuest()">＋</button>`;
 }
 
-function renderQuestCard(q, today){
-  const qt = QUEST_TYPES[q.type]||QUEST_TYPES.side;
+function renderQuestCard(s, today){
+  const qt=stepMeta(s);
+  const isDone=s.state===DONE_STATE;
   let dueHtml="", isOverdue=false, isSoon=false;
-  if(q.dueDate&&!q.done){
-    const diff=daysUntil(today,q.dueDate);
+  if(s.due&&!isDone){
+    const diff=daysUntil(today,s.due);
     isOverdue=diff<0;
     isSoon=diff>=0&&diff<=3;
     const dueLabel=isOverdue?`逾期 ${Math.abs(diff)} 天`
@@ -1455,33 +1458,35 @@ function renderQuestCard(q, today){
       :`${diff} 天後截止`;
     dueHtml=`<span class="quest-due ${isOverdue?"overdue":isSoon?"soon":"ok"}">📅 ${dueLabel}</span>`;
   }
-  // Build skill requirement display from multi-rewards array
-  const rewards=q.rewards&&q.rewards.length>0?q.rewards
-    :(q.rewardSkillId?[{skillId:q.rewardSkillId,xp:q.rewardXP||50}]:[]);
-  const rewardHtml=rewards.length>0
-    ?rewards.map(r=>{
-        const s=state.subSkills.find(x=>x.id===r.skillId);
-        return s?`<span class="quest-reward">🎯 ${s.icon||""} ${s.name} +${r.xp} EXP</span>`:"";
-      }).join("")
-    :`<span class="quest-reward" style="color:var(--muted2)">無需特定技能</span>`;
 
-  const isDailyDone=q.type==="daily"&&isDailyDoneToday(q);
-  const cardDone=q.done||isDailyDone;
-  const completeBtnDisabled=isDailyDone;
+  // 歸屬：rewards 逐筆列出；沒有 rewards 就靠所屬目標的核心（§4.3）
+  const rewardHtml=s.rewards.length>0
+    ?s.rewards.map(r=>{
+        const sk=skillById(r.skillId);
+        return sk?`<span class="quest-reward">🎯 ${sk.icon||""} ${sk.name} +${r.xp} EXP</span>`:"";
+      }).join("")
+    :s.goalId
+    ?`<span class="quest-reward" style="color:var(--muted2)">🎯 依目標歸屬</span>`
+    :`<span class="quest-reward" style="color:var(--muted2)">尚未指定歸屬</span>`;
+
+  const goalLabel=s.goalId
+    ?`<span style="font-size:9px;color:var(--muted2)">🎯 ${goalTitle(s.goalId)}</span>`:"";
+
+  const isDailyDone=isDailyDoneToday(s);
+  const cardDone=isDone||isDailyDone;
   let dailyMeta="";
-  if(q.type==="daily"){
-    const streak=calcStreak(q);
+  if(s.kind==="daily"){
+    const streak=stepStreak(s);
     const streakStr=streak>=2?`🔥 ${streak} 天連續`:streak===1?"🔥 連續 1 天":"";
-    const countStr=q.completedCount?`累計 ${q.completedCount} 次`:"";
+    const countStr=s.completedCount?`累計 ${s.completedCount} 次`:"";
     dailyMeta=`<span style="font-size:9px;color:var(--muted2);margin-left:6px">${[streakStr,countStr].filter(Boolean).join(" · ")}</span>`;
   }
 
-  // Format createdAt for display
-  const createdLabel=q.createdAt
-    ?`<span style="font-size:9px;color:var(--muted2)">📌 ${new Date(q.createdAt).toLocaleDateString("zh-TW",{year:"numeric",month:"numeric",day:"numeric"})}</span>`
+  const createdLabel=s.createdAt
+    ?`<span style="font-size:9px;color:var(--muted2)">📌 ${new Date(s.createdAt).toLocaleDateString("zh-TW",{year:"numeric",month:"numeric",day:"numeric"})}</span>`
     :"";
 
-  return `<div class="quest-card ${cardDone?"done":""} ${isOverdue?"overdue":""}" onclick="openEditQuest('${q.id}')">
+  return `<div class="quest-card ${cardDone?"done":""} ${isOverdue?"overdue":""}" onclick="openEditQuest('${s.id}')">
     <div style="position:absolute;top:0;left:0;width:3px;height:100%;background:${qt.color};border-radius:12px 0 0 12px"></div>
     <div style="padding-left:6px">
       <div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px">
@@ -1489,34 +1494,40 @@ function renderQuestCard(q, today){
           ${qt.icon} ${qt.label}
         </span>
         ${isDailyDone?'<span class="daily-done-badge">✓ 今日已完成</span>':""}
-        ${q.done&&q.type!=="daily"?'<span style="font-size:9px;color:#10b981;margin-left:2px">✓ 已完成</span>':""}
+        ${isDone?'<span style="font-size:9px;color:#10b981;margin-left:2px">✓ 已完成</span>':""}
         ${dailyMeta}
+        ${goalLabel}
         ${createdLabel}
       </div>
-      <div class="quest-title ${cardDone?"done-strike":""}">${q.title}</div>
-      ${q.desc?`<div class="quest-desc">${q.desc}</div>`:""}
+      <div class="quest-title ${cardDone?"done-strike":""}">${s.title}</div>
+      ${s.desc?`<div class="quest-desc">${s.desc}</div>`:""}
       <div class="quest-meta">
         <div style="display:flex;flex-direction:column;gap:3px">
           ${rewardHtml}
           ${dueHtml}
-          ${q.dueDate&&!q.done&&!q.archived?`<button
-            onclick="event.stopPropagation();downloadICS('${q.id}')"
+          ${s.due&&!isDone&&!s.archived?`<button
+            onclick="event.stopPropagation();downloadICS('${s.id}')"
             style="align-self:flex-start;margin-top:3px;background:#a855f718;border:1px solid #a855f755;
             color:#a855f7;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:9px;
             font-family:'Share Tech Mono',monospace">📅 加入日曆</button>`:""}
+          ${s.kind==="daily"&&!s.archived?`<button
+            onclick="event.stopPropagation();backfillDaily('${s.id}')"
+            style="align-self:flex-start;margin-top:3px;background:#10b98118;border:1px solid #10b98155;
+            color:#10b981;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:9px;
+            font-family:'Share Tech Mono',monospace">⏪ 補登</button>`:""}
         </div>
-        ${q.done&&!q.archived?`<button class="quest-complete-btn"
+        ${isDone&&!s.archived?`<button class="quest-complete-btn"
           style="background:#f59e0b18;border:1px solid #f59e0b55;color:#f59e0b"
-          onclick="event.stopPropagation();archiveQuest('${q.id}')">📦 封存</button>`:""}
-        ${q.archived?`<button class="quest-complete-btn"
+          onclick="event.stopPropagation();archiveQuest('${s.id}')">📦 封存</button>`:""}
+        ${s.archived?`<button class="quest-complete-btn"
           style="background:#22d3ee18;border:1px solid #22d3ee55;color:#22d3ee"
-          onclick="event.stopPropagation();unarchiveQuest('${q.id}')">↩ 取消封存</button>`:""}
-        ${!q.done&&!q.archived?`<button class="quest-complete-btn"
-          style="background:${completeBtnDisabled?"#1e3a4a":qt.color+"22"};
-          border:1px solid ${completeBtnDisabled?"#2a4a6a":qt.color+"66"};
-          color:${completeBtnDisabled?"var(--muted)":qt.color};
-          opacity:${completeBtnDisabled?0.5:1}"
-          onclick="event.stopPropagation();completeQuest('${q.id}')">
+          onclick="event.stopPropagation();unarchiveQuest('${s.id}')">↩ 取消封存</button>`:""}
+        ${!isDone&&!s.archived?`<button class="quest-complete-btn"
+          style="background:${isDailyDone?"#1e3a4a":qt.color+"22"};
+          border:1px solid ${isDailyDone?"#2a4a6a":qt.color+"66"};
+          color:${isDailyDone?"var(--muted)":qt.color};
+          opacity:${isDailyDone?0.5:1}"
+          onclick="event.stopPropagation();completeQuest('${s.id}')">
           ${isDailyDone?"明日再來":"✓ 完成"}</button>`:""}
       </div>
     </div>
@@ -1532,14 +1543,11 @@ function daysUntil(fromISO,toISO){
   const at=iso=>{const[y,m,d]=String(iso).split("-").map(Number);return Date.UTC(y,m-1,d);};
   return Math.round((at(toISO)-at(fromISO))/86400000);
 }
-function isDailyDoneToday(q){
-  if(q.type!=="daily"||!q.lastCompletedDate)return false;
-  return q.lastCompletedDate===todayStr();
-}
+
 function completeQuest(id){
-  const q=state.quests.find(x=>x.id===id);
-  if(!q)return;
-  if(q.type==="daily"&&isDailyDoneToday(q)){
+  const s=stepById(id);
+  if(!s)return;
+  if(s.kind==="daily"&&isDailyDoneToday(s)){
     showToast("今日已完成，明天再來！");return;
   }
   // 完成與 XP 發放都交給 store：狀態、streak、xpLog 與未歸屬 XP 在那裡一次處理
@@ -1547,18 +1555,26 @@ function completeQuest(id){
   flushState();
   const prevLevels={};
   CORES.forEach(c=>{prevLevels[c.id]=calcLv(getCoreXP(c.id));});
-  const before=new Map(state.subSkills.map(s=>[s.id,s.xp||0]));
+  const before=new Map(state.subSkills.map(x=>[x.id,x.xp||0]));
   try{
     window.Goals.completeStep(id);
   }catch{
-    showToast("完成失敗，請重新整理再試");return;
+    // 收件匣是唯一沒有事先歸屬的 kind，完成時才問（§4.3）。沒選就不完成。
+    if(s.kind!=="inbox"){showToast("完成失敗，請重新整理再試");return;}
+    const coreId=window.Goals.pickCore("這次完成的 XP 要算到哪個核心？");
+    if(!coreId)return;
+    try{
+      window.Goals.completeStep(id,{coreId});
+    }catch{
+      showToast("完成失敗，請重新整理再試");return;
+    }
   }
   loadState();
 
   const msgs=[];
-  state.subSkills.forEach(s=>{
-    const gained=(s.xp||0)-(before.get(s.id)||0);
-    if(gained>0)msgs.push(`${s.name}+${gained}`);
+  state.subSkills.forEach(x=>{
+    const gained=(x.xp||0)-(before.get(x.id)||0);
+    if(gained>0)msgs.push(`${x.name}+${gained}`);
   });
   const levelUps=[];
   CORES.forEach(c=>{
@@ -1568,9 +1584,26 @@ function completeQuest(id){
   if(levelUps.length>0){
     setTimeout(()=>showToast(`🎊 升級！${levelUps.join(" ")}`,3500),800);
   }
-  if(msgs.length>0)showToast(`🎉 ${q.title} 完成！${msgs.join(" · ")}`);
-  else showToast(`🎉 任務完成：${q.title}`);
+  if(msgs.length>0)showToast(`🎉 ${s.title} 完成！${msgs.join(" · ")}`);
+  else showToast(`🎉 任務完成：${s.title}`);
   render();
+}
+
+// 補登（§5.1）：只能補過去 3 天，XP 記在被補登的那一天。
+function backfillDaily(id){
+  const s=stepById(id);
+  if(!s)return;
+  const yesterday=window.Goals.shiftDate(todayStr(),-1);
+  const date=prompt(`補登哪一天？（YYYY-MM-DD，只能補過去 ${window.Goals.BACKFILL_DAYS} 天內）`,yesterday);
+  if(!date||!date.trim())return;
+  flushState();
+  try{
+    window.Goals.backfillDaily(id,date.trim());
+  }catch(err){
+    alert(err.message);return;
+  }
+  loadState();render();
+  showToast(`⏪ 已補登 ${date.trim()}`);
 }
 
 function openAddQuest(){
@@ -1578,20 +1611,18 @@ function openAddQuest(){
   showQuestModal(null);
 }
 function openEditQuest(id){
-  _editingQuest=state.quests.find(q=>q.id===id)||null;
+  _editingQuest=stepById(id);
   showQuestModal(_editingQuest);
 }
 
 let _editingQuest=null;
+let _modalRewards=[];
 
-function showQuestModal(q){
+function showQuestModal(s){
   const existing=document.getElementById("modal");if(existing)existing.remove();
-  const isNew=!q;
-  const type=q?.type||"main";
-  const qt=QUEST_TYPES[type];
-  // Init global rewards
-  _modalRewards = q?.rewards ? q.rewards.map(r=>({...r}))
-    : (q?.rewardSkillId ? [{skillId:q.rewardSkillId, xp:q.rewardXP||50}] : []);
+  const isNew=!s;
+  _modalRewards=s?s.rewards.map(r=>({...r})):[];
+  const kind=s?.kind||"main";
 
   const overlay=document.createElement("div");
   overlay.id="modal";overlay.className="modal-overlay";
@@ -1603,32 +1634,32 @@ function showQuestModal(q){
 
       <label class="form-label">任務類型</label>
       <div class="type-toggle" style="margin-bottom:14px">
-        ${Object.entries(QUEST_TYPES).map(([k,t])=>`
+        ${Object.entries(KIND_META).map(([k,t])=>`
           <button id="qtype-${k}" class="type-btn"
-            style="${(q?.type||"main")===k?`background:${t.color}22;border-color:${t.color};color:${t.color}`:""}"
+            style="${kind===k?`background:${t.color}22;border-color:${t.color};color:${t.color}`:""}"
             onclick="selectQType('${k}')">${t.icon} ${t.label.replace("任務","")}</button>`).join("")}
       </div>
-      <input type="hidden" id="q-type" value="${q?.type||"main"}"/>
+      <input type="hidden" id="q-type" value="${kind}"/>
 
       <label class="form-label">任務名稱 *</label>
-      <input class="form-input" id="q-title" value="${q?.title||""}" placeholder="例：完成《原子習慣》第一章"/>
+      <input class="form-input" id="q-title" value="${s?.title||""}" placeholder="例：完成《原子習慣》第一章"/>
 
       <label class="form-label">描述</label>
       <textarea class="form-input" id="q-desc" rows="2"
         style="resize:none;height:60px;line-height:1.5"
-        placeholder="任務目標或備注...">${q?.desc||""}</textarea>
+        placeholder="任務目標或備注...">${s?.desc||""}</textarea>
 
       <label class="form-label">截止日期與時間</label>
       <div style="display:flex;gap:8px;margin-bottom:14px">
-        <input class="form-input" type="date" id="q-due" value="${q?.dueDate||""}"
+        <input class="form-input" type="date" id="q-due" value="${s?.due||""}"
           style="margin-bottom:0;flex:1.4"/>
-        <input class="form-input" type="time" id="q-due-time" value="${q?.dueTime||""}"
+        <input class="form-input" type="time" id="q-due-time" value="${s?.dueTime||""}"
           style="margin-bottom:0;flex:1" placeholder="選填時間"/>
       </div>
 
       <label class="form-label">需要哪些技能 → 完成後給予 EXP（可多選）</label>
       <div id="reward-list" style="margin-bottom:8px"></div>
-      <div style="display:flex;gap:6px;margin-bottom:14px">
+      <div style="display:flex;gap:6px;margin-bottom:8px">
         <select class="form-select" id="skill-pick-select" style="margin-bottom:0;flex:1">
           <option value="">選擇需要的子技能…</option>
         </select>
@@ -1636,17 +1667,28 @@ function showQuestModal(q){
           style="background:#f59e0b22;border:1px solid #f59e0b66;color:#f59e0b;
           border-radius:8px;padding:8px 14px;cursor:pointer;font-size:13px;flex-shrink:0">+</button>
       </div>
+      <div style="display:flex;gap:6px;margin-bottom:6px">
+        <select class="form-select" id="core-pick-select" style="margin-bottom:0;flex:1">
+          <option value="">或直接記到某個核心的「歷練」…</option>
+          ${window.Goals.listCores().map(c=>`<option value="${c.id}">${c.icon||""} ${c.title||c.name}</option>`).join("")}
+        </select>
+        <button onclick="addRewardCoreFromSelect()"
+          style="background:#22d3ee22;border:1px solid #22d3ee66;color:#22d3ee;
+          border-radius:8px;padding:8px 14px;cursor:pointer;font-size:13px;flex-shrink:0">+</button>
+      </div>
+      <div style="font-size:9px;color:var(--muted2);margin-bottom:14px">
+        主線 / 支線 / 每日必須指定歸屬；收件匣可以先空著，完成或指派時再指定。
+      </div>
 
       <div class="modal-actions">
         <button class="btn-save" style="background:#f59e0b22;border:1px solid #f59e0b77;color:#f59e0b"
           onclick="saveQuest()">
           ${isNew?"✦ 新增任務":"儲存"}
         </button>
-        ${!isNew?`<button class="btn-del" onclick="deleteQuest('${q.id}')">刪除</button>`:""}
+        ${!isNew?`<button class="btn-del" onclick="deleteQuest('${s.id}')">刪除</button>`:""}
       </div>
     </div>`;
   document.body.appendChild(overlay);
-  // Init reward list and skill picker
   renderRewardList();
 }
 
@@ -1654,13 +1696,13 @@ function renderRewardList(){
   const el=document.getElementById("reward-list");
   if(!el)return;
   if(_modalRewards.length===0){
-    el.innerHTML='<div style="font-size:10px;color:var(--muted2);padding:4px 0 8px">尚未指定需要的技能</div>';
+    el.innerHTML='<div style="font-size:10px;color:var(--muted2);padding:4px 0 8px">尚未指定歸屬</div>';
   } else {
     let rows="";
     _modalRewards.forEach((r,i)=>{
-      const s=state.subSkills.find(x=>x.id===r.skillId);
-      if(!s)return;
-      const c=CORE_MAP[s.coreId];
+      const sk=skillById(r.skillId);
+      if(!sk)return;
+      const c=CORE_MAP[sk.coreId];
       const xpBtns=[10,25,50,100].map(v=>{
         const active=(r.xp||50)===v;
         return '<button onclick="event.stopPropagation();_modalRewards['+i+'].xp='+v+';renderRewardList()" '
@@ -1670,7 +1712,7 @@ function renderRewardList(){
           +';border-radius:5px;padding:3px 8px;cursor:pointer;font-size:10px">'+v+'</button>';
       }).join("");
       rows+='<div class="reward-skill-row">'
-        +'<span class="reward-skill-name">'+( s.icon||"")+" "+s.name
+        +'<span class="reward-skill-name">'+(sk.icon||"")+" "+sk.name
         +'<span style="color:var(--muted2);font-size:9px"> ('+(c?c.title||c.name:"")+")</span></span>"
         +'<div style="display:flex;gap:3px;flex-shrink:0">'+xpBtns+'</div>'
         +'<button class="reward-del" onclick="_modalRewards.splice('+i+',1);renderRewardList();refreshSkillSelect()">✕</button>'
@@ -1695,15 +1737,27 @@ function refreshSkillSelect(){
 function addRewardSkillFromSelect(){
   const sel=document.getElementById("skill-pick-select");
   if(!sel||!sel.value)return;
-  const skillId=sel.value;
-  if(_modalRewards.find(r=>r.skillId===skillId))return;
-  _modalRewards.push({skillId,xp:50});
+  addModalReward(sel.value);
+}
+
+// 沒有合適的子技能時，直接記到核心的承接技能「歷練」（§4.3）。
+function addRewardCoreFromSelect(){
+  const sel=document.getElementById("core-pick-select");
+  if(!sel||!sel.value)return;
+  addModalReward(`sk_${sel.value}_general`);
+  sel.value="";
+}
+
+function addModalReward(skillId){
+  if(!skillId||_modalRewards.find(r=>r.skillId===skillId))return;
+  const kind=document.getElementById("q-type")?.value||"main";
+  _modalRewards.push({skillId,xp:window.Goals.KIND_DEFAULT_XP[kind]||50});
   renderRewardList();
 }
 
 function selectQType(k){
   document.getElementById("q-type").value=k;
-  Object.entries(QUEST_TYPES).forEach(([key,t])=>{
+  Object.entries(KIND_META).forEach(([key,t])=>{
     const btn=document.getElementById("qtype-"+key);
     if(!btn)return;
     if(key===k){
@@ -1716,46 +1770,35 @@ function selectQType(k){
   });
 }
 
-
-
 function saveQuest(){
   const title=document.getElementById("q-title")?.value?.trim();
   if(!title){alert("請輸入任務名稱");return;}
-  const type=document.getElementById("q-type")?.value||"main";
-  const desc=document.getElementById("q-desc")?.value?.trim()||"";
-  const dueDate=document.getElementById("q-due")?.value||"";
-  const dueTime=document.getElementById("q-due-time")?.value||"";
-  // Read final XP values from inputs
-  const rewardInputs=document.querySelectorAll(".reward-xp-input");
-  rewardInputs.forEach((el,i)=>{if(_modalRewards[i])_modalRewards[i].xp=Math.max(1,parseInt(el.value)||1);});
-  const rewards=[..._modalRewards];
-
-  if(!state.quests)state.quests=[];
-  if(_editingQuest){
-    const q=state.quests.find(x=>x.id===_editingQuest.id);
-    if(q){
-      q.title=title;q.type=type;q.desc=desc;q.dueDate=dueDate;q.dueTime=dueTime;q.rewards=rewards;
-      // legacy compat
-      q.rewardSkillId=rewards[0]?.skillId||null;q.rewardXP=rewards[0]?.xp||50;
-    }
-  } else {
-    state.quests.push({
-      id:"q_"+Date.now(),title,type,desc,dueDate,dueTime,rewards,
-      rewardSkillId:rewards[0]?.skillId||null,rewardXP:rewards[0]?.xp||50,
-      done:false,completedAt:null,completedCount:0,lastCompletedDate:null,
-      createdAt:new Date().toISOString(),
-    });
+  const spec={
+    kind: document.getElementById("q-type")?.value||"main",
+    title,
+    desc: document.getElementById("q-desc")?.value?.trim()||"",
+    due: document.getElementById("q-due")?.value||null,
+    dueTime: document.getElementById("q-due-time")?.value||null,
+    rewards: [..._modalRewards],
+  };
+  flushState();
+  try{
+    if(_editingQuest)window.Goals.updateStep(_editingQuest.id,spec);
+    else window.Goals.createStep(spec);
+  }catch(err){
+    // 歸屬沒指定就擋在這裡，不寫下一筆之後才要補救的資料（§4.3）
+    alert(err.message);return;
   }
-  saveState();closeModal();render();
+  loadState();closeModal();render();showToast("✓ 已儲存");
 }
 
 function downloadICS(id){
-  const q=state.quests.find(x=>x.id===id);
-  if(!q||!q.dueDate)return;
+  const s=stepById(id);
+  if(!s||!s.due)return;
 
   // Build start datetime
-  const dateStr=q.dueDate; // YYYY-MM-DD
-  const timeStr=q.dueTime||"09:00"; // HH:MM, default 9am if no time set
+  const dateStr=s.due; // YYYY-MM-DD
+  const timeStr=s.dueTime||"09:00"; // HH:MM, default 9am if no time set
   const [y,mo,d]=dateStr.split("-").map(Number);
   const [h,mi]=timeStr.split(":").map(Number);
 
@@ -1766,12 +1809,12 @@ function downloadICS(id){
   const endDate=new Date(y,mo-1,d,h+1,mi);
   const dtEnd=`${endDate.getFullYear()}${pad(endDate.getMonth()+1)}${pad(endDate.getDate())}T${pad(endDate.getHours())}${pad(endDate.getMinutes())}00`;
 
-  const uid=`quest-${q.id}@skill-pwa`;
+  const uid=`quest-${s.id}@skill-pwa`;
   const now=new Date();
   const dtStamp=`${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}T${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}Z`;
-  const desc=q.desc?q.desc.replace(/\n/g,"\\n"):"";
-  const alarm=q.dueTime
-    ?`BEGIN:VALARM\r\nTRIGGER:-PT30M\r\nACTION:DISPLAY\r\nDESCRIPTION:${q.title} 即將到期\r\nEND:VALARM\r\n`
+  const desc=s.desc?s.desc.replace(/\n/g,"\\n"):"";
+  const alarm=s.dueTime
+    ?`BEGIN:VALARM\r\nTRIGGER:-PT30M\r\nACTION:DISPLAY\r\nDESCRIPTION:${s.title} 即將到期\r\nEND:VALARM\r\n`
     :"";
 
   const ics=[
@@ -1785,7 +1828,7 @@ function downloadICS(id){
     `DTSTAMP:${dtStamp}`,
     `DTSTART:${dtStart}`,
     `DTEND:${dtEnd}`,
-    `SUMMARY:${q.title}`,
+    `SUMMARY:${s.title}`,
     `DESCRIPTION:${desc}`,
     alarm.replace(/\r\n$/, ""),
     "END:VEVENT",
@@ -1799,7 +1842,7 @@ function downloadICS(id){
   reader.onload=()=>{
     const a=document.createElement("a");
     a.href=reader.result;
-    a.download=`${q.title.replace(/[^\w\u4e00-\u9fff]/g,"_")}.ics`;
+    a.download=`${s.title.replace(/[^\w一-鿿]/g,"_")}.ics`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -1808,62 +1851,57 @@ function downloadICS(id){
   showToast("📅 .ics 已下載，點開即可加入日曆");
 }
 
-
 function archiveQuest(id){
-  const q=state.quests.find(x=>x.id===id);
-  if(!q)return;
-  q.archived=true;
-  q.archivedAt=new Date().toISOString();
-  saveState(true);render();showToast("📦 已封存任務");
+  flushState();
+  window.Goals.archiveStep(id,true);
+  loadState();render();showToast("📦 已封存任務");
 }
 function unarchiveQuest(id){
-  const q=state.quests.find(x=>x.id===id);
-  if(!q)return;
-  q.archived=false;q.archivedAt=null;
-  saveState(true);render();showToast("↩ 已取消封存");
+  flushState();
+  window.Goals.archiveStep(id,false);
+  loadState();render();showToast("↩ 已取消封存");
 }
 function archiveAllDone(){
-  const cnt=state.quests.filter(q=>q.done&&q.type!=="daily"&&!q.archived).length;
+  const cnt=window.Goals.listSteps().filter(s=>s.state===DONE_STATE&&!s.archived).length;
   if(!confirm(`確定封存所有 ${cnt} 個已完成任務？`))return;
-  const now=new Date().toISOString();
-  state.quests.forEach(q=>{
-    if(q.done&&q.type!=="daily"&&!q.archived){q.archived=true;q.archivedAt=now;}
-  });
-  saveState(true);render();showToast(`📦 已封存 ${cnt} 個任務`);
+  flushState();
+  const n=window.Goals.archiveDoneSteps();
+  loadState();render();showToast(`📦 已封存 ${n} 個任務`);
 }
 function clearArchived(){
-  const cnt=state.quests.filter(q=>q.archived).length;
+  const cnt=window.Goals.listSteps().filter(s=>s.archived).length;
   if(!confirm(`確定永久清除所有 ${cnt} 個封存任務？此操作無法復原。`))return;
-  state.quests=state.quests.filter(q=>!q.archived);
-  saveState(true);render();showToast(`🗑 已清除 ${cnt} 個封存任務`);
+  flushState();
+  const n=window.Goals.deleteStepsWhere(s=>s.archived===true);
+  loadState();render();showToast(`🗑 已清除 ${n} 個封存任務`);
 }
-
-
 function clearDoneQuests(){
-  const cnt=state.quests.filter(q=>q.done&&q.type!=="daily"&&!q.archived).length;
+  const cnt=window.Goals.listSteps().filter(s=>s.state===DONE_STATE&&!s.archived).length;
   if(!confirm(`確定清除所有 ${cnt} 個已完成任務？此操作無法復原。`))return;
-  state.quests=state.quests.filter(q=>!(q.done&&q.type!=="daily"&&!q.archived));
-  saveState(true);render();showToast(`🗑 已清除 ${cnt} 個已完成任務`);
+  flushState();
+  const n=window.Goals.deleteStepsWhere(s=>s.state===DONE_STATE&&!s.archived);
+  loadState();render();showToast(`🗑 已清除 ${n} 個已完成任務`);
 }
 
 function deleteQuest(id){
   if(!confirm("確定刪除此任務？"))return;
-  state.quests=state.quests.filter(q=>q.id!==id);
-  saveState();closeModal();render();
+  flushState();
+  window.Goals.deleteStep(id);
+  loadState();closeModal();render();
 }
 
 // ── Check overdue & daily reset on app open (iOS-safe: no background timer dependency) ──
 function checkOverdue(){
-  if(!state.quests)return;
   // 逾期同樣以邏輯日為準（§5.0）。用當下的午夜判斷的話，凌晨 0-4 點這個提示會
   // 說「已逾期」，提醒面板卻說「今日到期」，兩邊對不上。
   const today=todayStr();
-  const overdue=state.quests.filter(q=>
-    !q.done&&q.type!=="daily"&&q.dueDate&&q.dueDate<today);
+  const steps=window.Goals.listSteps();
+  const overdue=steps.filter(s=>
+    s.kind!=="daily"&&s.due&&s.due<today&&isActionableStep(s));
   if(overdue.length>0)showToast(`⚠️ 有 ${overdue.length} 個任務已逾期`,2500);
 
-  // D: Today summary - count pending daily quests
-  const pendingDaily=state.quests.filter(q=>q.type==="daily"&&!isDailyDoneToday(q)).length;
+  const pendingDaily=steps.filter(s=>
+    s.kind==="daily"&&!s.archived&&!isDailyDoneToday(s)).length;
   if(pendingDaily>0){
     setTimeout(()=>showToast(`🌟 今日還有 ${pendingDaily} 個每日習慣待完成`,2500),overdue.length>0?3200:600);
   }

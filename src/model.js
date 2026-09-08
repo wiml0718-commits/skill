@@ -422,6 +422,33 @@ export function inboxPending(steps){
   return inboxSteps(steps).filter(s => !s.archived && isActionable(s.state));
 }
 
+// ── 每日任務（§5.1）─────────────────────────────────────────────────────────
+// 連續天數當場從 streakHistory 推導，不落地儲存。從今天往回走，今天還沒完成
+// 不算中斷——早上打開 app 時 streak 不該先歸零再等使用者去補。
+export function calcStreak(streakHistory, today){
+  const days = new Set(Array.isArray(streakHistory) ? streakHistory : []);
+  if(!days.size) return 0;
+  let streak = 0;
+  for(let back = 0; back <= MAX_STREAK_LOOKBACK; back++){
+    const day = shiftDate(today, -back);
+    if(days.has(day)){ streak += 1; continue; }
+    if(back === 0) continue;   // 今天還沒做，不算斷
+    break;
+  }
+  return streak;
+}
+
+// 往前 / 往後幾天。用 UTC 做算術，避免日光節約時間讓某些日子變成 23 或 25 小時。
+export function shiftDate(iso, days){
+  const [y, m, d] = String(iso).split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + days));
+  const pad = n => String(n).padStart(2, "0");
+  return `${dt.getUTCFullYear()}-${pad(dt.getUTCMonth() + 1)}-${pad(dt.getUTCDate())}`;
+}
+
+// 一條 streak 最多往回看這麼多天。純粹是迴圈的上界，不是規則。
+const MAX_STREAK_LOOKBACK = 3650;
+
 // ── 回顧 ─────────────────────────────────────────────────────────────────────
 // 兩個日期字串相差幾天。用 UTC 做算術，避免日光節約時間讓某些日子變成 23 或 25 小時。
 export function daysBetween(fromISO, toISO){
