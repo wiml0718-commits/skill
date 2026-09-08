@@ -514,6 +514,11 @@ export function createStore(backend = defaultBackend()){
       if(patch.goalId !== undefined && patch.goalId !== null) findGoal(patch.goalId);
       const step = model.createStep({...prev, ...patch, id});
       requireAttribution(step);
+      // 把已完成的任務改成每日時，DONE 要拉回待辦：每日任務不進 DONE（§5.1），
+      // 留著會變成一個永遠打不了卡、只能封存的每日任務。
+      if(step.kind === model.STEP_KIND.DAILY && step.state === model.STEP_STATE.DONE){
+        step.state = model.STEP_STATE.TODO;
+      }
       return replaceStep(i, step);
     },
 
@@ -532,12 +537,14 @@ export function createStore(backend = defaultBackend()){
                              archivedAt: on === true ? new Date().toISOString() : null});
     },
 
-    // 批次封存 / 清除。daily 不進 DONE，所以不會落進這兩個集合。
+    // 批次封存 / 清除。daily 不進 DONE（§5.1），連遷移進來還停在 DONE 的也一併
+    // 排除——把它封存掉等於把一個還在跑的習慣藏起來。
     archiveDoneSteps(){
       const at = new Date().toISOString();
       let count = 0;
       data.steps = data.steps.map(s => {
         if(s.state !== model.STEP_STATE.DONE || s.archived) return s;
+        if(s.kind === model.STEP_KIND.DAILY) return s;
         count += 1;
         return {...s, archived: true, archivedAt: at};
       });

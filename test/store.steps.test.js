@@ -200,3 +200,34 @@ test("新建立的步驟留下建立時間，重新載入還在", () => {
   again.load();
   assert.equal(again.getState().steps[0].createdAt, s.createdAt);
 });
+
+test("已完成的任務改成每日時，狀態拉回待辦，還能繼續打卡", () => {
+  const store = fresh();
+  const s = store.addStep({kind: m.STEP_KIND.SIDE, title: "做完了", rewards: REWARD});
+  store.completeStep(s.id);
+  assert.equal(stepsOf(store)[0].state, m.STEP_STATE.DONE);
+
+  const daily = store.updateStep(s.id, {kind: m.STEP_KIND.DAILY});
+  assert.equal(daily.kind, m.STEP_KIND.DAILY);
+  assert.equal(daily.state, m.STEP_STATE.TODO, "每日任務不進 DONE，否則永遠打不了卡");
+
+  const after = store.completeStep(s.id);
+  assert.equal(after.completedCount, 1);
+  assert.equal(after.state, m.STEP_STATE.TODO);
+});
+
+test("遷移進來還停在 DONE 的每日任務不會被批次封存掃走", () => {
+  const store = fresh();
+  const s = store.addStep({kind: m.STEP_KIND.DAILY, title: "喝水", rewards: REWARD});
+  // 遷移進來的 legacy daily（done: true）就是這個形狀，繞過 updateStep 直接造出來
+  const raw = store.getState();
+  store.replaceAll({...raw, steps: raw.steps.map(x =>
+    (x.id === s.id ? {...x, state: m.STEP_STATE.DONE} : x))});
+  assert.equal(store.getState().steps[0].state, m.STEP_STATE.DONE);
+
+  assert.equal(store.archiveDoneSteps(), 0, "把還在跑的習慣封存起來等於藏掉它");
+  assert.equal(store.getState().steps[0].archived, false);
+
+  // 完成一次就會被拉回待辦（markDaily）
+  assert.equal(store.completeStep(s.id).state, m.STEP_STATE.TODO);
+});

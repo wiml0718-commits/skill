@@ -656,7 +656,9 @@ function renderDetail(coreId){
 function renderStats(){
   const sorted=[...CORES].map(c=>({...c,xp:getCoreXP(c.id),lv:calcLv(getCoreXP(c.id))}))
     .sort((a,b)=>b.xp-a.xp);
-  const totalXP=state.subSkills.reduce((a,s)=>a+(s.xp||0),0);
+  // 總 EXP 走 store 的完整技能清單：與 getCoreXP() 一致，含承接技能「歷練」，
+  // 否則核心加起來會比這裡的總數大（§4.3）。
+  const totalXP=window.Goals.listSkills().reduce((a,s)=>a+(s.xp||0),0);
   const totalLv=CORES.reduce((a,c)=>a+calcLv(getCoreXP(c.id)),0);
   const activeCnt=state.subSkills.filter(s=>s.type==="active").length;
   const passiveCnt=state.subSkills.filter(s=>s.type==="passive").length;
@@ -1373,7 +1375,7 @@ function renderQuests(){
   // 每日任務不進 DONE（§5.1），所以「進行中」對它來說永遠成立（除非封存）。
   const isOpen=s=>s.kind==="daily"?!s.archived:isActionableStep(s);
   const filtered=steps.filter(s=>{
-    if(questFilter==="done")    return s.state===DONE_STATE&&!s.archived;
+    if(questFilter==="done")    return s.state===DONE_STATE&&s.kind!=="daily"&&!s.archived;
     if(questFilter==="archive") return s.archived===true;
     if(questFilter==="daily")   return s.kind==="daily"&&!s.archived;
     if(questFilter==="all")     return isOpen(s);
@@ -1386,7 +1388,7 @@ function renderQuests(){
     side:    steps.filter(s=>isOpen(s)&&s.kind==="side").length,
     daily:   steps.filter(s=>s.kind==="daily"&&!s.archived).length,
     inbox:   steps.filter(s=>isOpen(s)&&s.kind==="inbox").length,
-    done:    steps.filter(s=>s.state===DONE_STATE&&!s.archived).length,
+    done:    steps.filter(s=>s.state===DONE_STATE&&s.kind!=="daily"&&!s.archived).length,
     archive: steps.filter(s=>s.archived===true).length,
   };
 
@@ -1477,7 +1479,10 @@ function renderQuests(){
 
 function renderQuestCard(s, today){
   const qt=stepMeta(s);
-  const isDone=s.state===DONE_STATE;
+  // 每日任務不進 DONE（§5.1）。遷移進來的舊 daily 或改過 kind 的任務可能還停在
+  // DONE，把它當成完成就會少掉打卡按鈕，這條 streak 再也起不來——完成一次
+  // markDaily() 就會把它拉回待辦。
+  const isDone=s.kind!=="daily"&&s.state===DONE_STATE;
   let dueHtml="", isOverdue=false, isSoon=false;
   if(s.due&&!isDone){
     const diff=daysUntil(today,s.due);
@@ -1894,7 +1899,8 @@ function unarchiveQuest(id){
   loadState();render();showToast("↩ 已取消封存");
 }
 function archiveAllDone(){
-  const cnt=window.Goals.listSteps().filter(s=>s.state===DONE_STATE&&!s.archived).length;
+  const cnt=window.Goals.listSteps().filter(s=>
+    s.state===DONE_STATE&&s.kind!=="daily"&&!s.archived).length;
   if(!confirm(`確定封存所有 ${cnt} 個已完成任務？`))return;
   flushState();
   const n=window.Goals.archiveDoneSteps();
@@ -1908,10 +1914,12 @@ function clearArchived(){
   loadState();render();showToast(`🗑 已清除 ${n} 個封存任務`);
 }
 function clearDoneQuests(){
-  const cnt=window.Goals.listSteps().filter(s=>s.state===DONE_STATE&&!s.archived).length;
+  const cnt=window.Goals.listSteps().filter(s=>
+    s.state===DONE_STATE&&s.kind!=="daily"&&!s.archived).length;
   if(!confirm(`確定清除所有 ${cnt} 個已完成任務？此操作無法復原。`))return;
   flushState();
-  const n=window.Goals.deleteStepsWhere(s=>s.state===DONE_STATE&&!s.archived);
+  const n=window.Goals.deleteStepsWhere(s=>
+    s.state===DONE_STATE&&s.kind!=="daily"&&!s.archived);
   loadState();render();showToast(`🗑 已清除 ${n} 個已完成任務`);
 }
 
