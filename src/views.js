@@ -2,8 +2,10 @@
 // 今日 / 目標 / 收件匣三個檢視。資料一律經由 store 取得，不直接碰 localStorage。
 
 import {createStore} from "./store.js";
-import {STEP_STATE, STEP_STATE_LABEL, GOAL_STATUS, hasDeferWarning, DEFER_WARN_THRESHOLD} from "./model.js";
+import {STEP_STATE, STEP_STATE_LABEL, GOAL_STATUS, hasDeferWarning, DEFER_WARN_THRESHOLD,
+        LEVEL_XP, MAX_LV, calcLv} from "./model.js";
 import {createReminders, todayISO} from "./reminders.js";
+import {lvName, levelProgress} from "./rpg.js";
 
 const store = createStore();
 const reminders = createReminders(store);
@@ -21,7 +23,21 @@ function toast(msg){
   if(typeof window !== "undefined" && typeof window.showToast === "function") window.showToast(msg);
 }
 
+// index.html 的內嵌 script 仍拿著一份 legacy 快照（`state`）。store 這邊改完之後
+// 不把它拉新的話，之後任何一次 saveLegacyState(state) 都會用舊的技能 XP 覆蓋掉
+// 剛發放的 XP，只留下 xpLog 那一筆。UI 統一之後（PR 3）這一層就會消失。
+function reloadLegacy(){
+  if(typeof window !== "undefined" && typeof window.loadState === "function") window.loadState();
+}
+
+// 反過來，動 store 之前要先讓 index.html 還在 debounce 的編輯落地，
+// 否則 reloadLegacy() 會把那筆還沒寫進去的編輯蓋掉。
+function flushLegacy(){
+  if(typeof window !== "undefined" && typeof window.flushState === "function") window.flushState();
+}
+
 function repaint(){
+  reloadLegacy();
   if(typeof window !== "undefined" && typeof window.render === "function") window.render();
 }
 
@@ -340,6 +356,22 @@ const api = {
     repaint();
   },
 
+  // ── XP 引擎（§4）：index.html 的內嵌 script 不是 module，透過這裡呼叫 ──────
+  completeStep(id){return store.completeStep(id);},
+  backfillDaily(id, date){return store.backfillDaily(id, date);},
+  adjustSkillXp(skillId, delta){return store.adjustSkillXp(skillId, delta);},
+  setSkillXp(skillId, value){return store.setSkillXp(skillId, value);},
+  assignXpEntry(entryId, coreId){return store.assignXpEntry(entryId, coreId);},
+  mergeSkills(spec){return store.mergeSkills(spec);},
+
+  // 等級曲線與階層名的單一來源。凍結避免呼叫端改到共用的門檻表。
+  LEVEL_XP: Object.freeze([...LEVEL_XP]),
+  MAX_LV,
+  calcLv,
+  lvName,
+  levelProgress,
+  todayISO,           // §5.0 的邏輯日：整個 app 唯一的「今天」
+
   // 與既有的備份匯出 / 匯入串接
   exportPayload(){return store.toJSON();},
   importPayload(data){store.replaceAll(data);},
@@ -359,6 +391,7 @@ function bind(root){
     const el = e.target.closest("[data-act]");
     if(!el || !root.contains(el)) return;
     const {act, id, sub: target} = el.dataset;
+    flushLegacy();
     if(act === "sub") return api.setSub(target);
     if(act === "add-goal") return api.addGoal();
     if(act === "capture") return api.capture();
@@ -373,11 +406,15 @@ function bind(root){
 
   root.addEventListener("change", e => {
     const el = e.target.closest('[data-act="assign"]');
-    if(el && root.contains(el)) api.assign(el.dataset.id, el.value);
+    if(!el || !root.contains(el)) return;
+    flushLegacy();
+    api.assign(el.dataset.id, el.value);
   });
 
   root.addEventListener("keydown", e => {
-    if(e.key === "Enter" && e.target.id === "inbox-input") api.capture();
+    if(e.key !== "Enter" || e.target.id !== "inbox-input") return;
+    flushLegacy();
+    api.capture();
   });
 }
 

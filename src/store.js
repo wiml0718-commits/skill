@@ -5,6 +5,9 @@
 import * as model from "./model.js";
 import {migrateV1, emptyReport, reportTotal, hasMergeNote, normalizeLegacyNotes,
         countSkillDrops, countStepDrops} from "./migrate.js";
+// XP 的規則與「今天」都住在 rpg.js：store 只負責套用結果並落地（§4、§5.0）。
+import {logicalToday, resolveGrants, compressXpLog, canBackfill,
+        countsAsActivity, BACKFILL_DAYS} from "./rpg.js";
 
 export const STORAGE_KEY = "skill-rpg-v2";
 export const SCHEMA_VERSION = 2;
@@ -203,11 +206,6 @@ function updatePeaks(data, today){
   data.meta.reviewPeak = Math.max(data.meta.reviewPeak, review);
 }
 
-function todayISO(d = new Date()){
-  const pad = n => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-
 // ── legacy 投影 ──────────────────────────────────────────────────────────────
 // index.html 的內嵌 script 仍以 {charName, cores, subSkills, quests} 的形狀工作。
 // 這一層把 v2 投影成那個形狀再投影回來，讓 UI 不必直接碰 storage，也不需要在
@@ -302,7 +300,10 @@ export function createStore(backend = defaultBackend()){
 
   function commit(){
     ensureGeneralSkills(data);
-    updatePeaks(data, todayISO());
+    const today = logicalToday();
+    updatePeaks(data, today);
+    // 上限在 store 層強制執行，不能只靠 UI（§3.6）
+    data.xpLog = compressXpLog(data.xpLog, today);
     persist();
   }
 
@@ -316,6 +317,66 @@ export function createStore(backend = defaultBackend()){
     holdWrites = true;
     ensureGeneralSkills(data);
     return store.getState();
+  }
+
+  // ── XP（§4）────────────────────────────────────────────────────────────
+  // 活動日只收 step 與 manual：merge 只是搬移既有 XP，rollup 的 date 是月初而
+  // 不是真的有活動的那天，併進去會憑空多出一批假的活動日（§5.2）。
+  function addActiveDay(date){
+    if(data.meta.activeDays.includes(date)) return;
+    data.meta.activeDays = [...data.meta.activeDays, date].sort();
+  }
+
+  function addXpEntry({date, skillId = null, xp, source, refId = null}){
+    const entry = model.createXpEntry({date, skillId, xp, source, refId});
+    data.xpLog = [...data.xpLog, entry];
+    if(countsAsActivity(entry.source)) addActiveDay(entry.date);
+    return entry;
+  }
+
+  function bumpSkill(skillId, delta){
+    data.skills = data.skills.map(s =>
+      (s.id === skillId ? {...s, xp: Math.max(0, s.xp + delta)} : s));
+  }
+
+  // 一筆發放：有歸屬就加到技能，沒有就進 unassignedXP 並留下 skillId 為 null 的
+  // 紀錄（§4.3.1）。不猜一個核心塞進去，也不靜默丟掉。
+  function grant({skillId, xp}, {date, source, refId = null}){
+    if(skillId) bumpSkill(skillId, xp);
+    else data.profile = {...data.profile,
+                         unassignedXP: Math.max(0, data.profile.unassignedXP + xp)};
+    return addXpEntry({date, skillId, xp, source, refId});
+  }
+
+  function grantForStep(step, date){
+    for(const g of resolveGrants(step, {goals: data.goals, skills: data.skills})){
+      grant(g, {date, source: model.XP_SOURCE.STEP, refId: step.id});
+    }
+  }
+
+  // 每日任務的一次打卡：完成與補登共用同一條路徑，差別只在日期（§5.1）。
+  function markDaily(i, day){
+    const step = data.steps[i];
+    // 同一天重複完成不重複加入，也不重複給 XP
+    if(step.streakHistory.includes(day)) return copyStep(step);
+    const next = model.createStep({
+      ...step,
+      streakHistory: [...step.streakHistory, day],
+      completedCount: step.completedCount + 1,
+      lastCompletedDate: !step.lastCompletedDate || day > step.lastCompletedDate
+        ? day : step.lastCompletedDate,
+      // 遷移進來的 daily 可能停在 DONE（legacy 的 done: true）。每日任務不進
+      // DONE，隔天自然又是待辦。
+      state: step.state === model.STEP_STATE.DONE ? model.STEP_STATE.TODO : step.state,
+    });
+    grantForStep(next, day);
+    return replaceStep(i, next);
+  }
+
+  function findSkill(id){
+    const i = data.skills.findIndex(s => s.id === id);
+    if(i < 0) throw new Error(`找不到 skill：${id}`);
+    return i;
   }
 
   function findStep(id){
@@ -464,9 +525,30 @@ export function createStore(backend = defaultBackend()){
       return copyStep(step);
     },
 
+    // 完成即發放 XP（§4.2）。每日任務不進 DONE，改記 streak（§5.1）。
     completeStep(id){
       const i = findStep(id);
-      return replaceStep(i, model.completeStep(data.steps[i]));
+      const step = data.steps[i];
+      const today = logicalToday();
+      if(step.kind === model.STEP_KIND.DAILY) return markDaily(i, today);
+      // 已經完成的不重複發放：重按一次不該再給一份 XP。
+      if(step.state === model.STEP_STATE.DONE) return copyStep(step);
+      const next = {...model.completeStep(step),
+                    completedAt: new Date().toISOString()};
+      grantForStep(next, today);
+      return replaceStep(i, next);
+    },
+
+    // 補登：把過去 3 天內的日期補進 streakHistory，XP 記在被補登的那一天（§5.1）
+    backfillDaily(id, date){
+      const i = findStep(id);
+      const step = data.steps[i];
+      if(step.kind !== model.STEP_KIND.DAILY) throw new Error("只有每日任務可以補登");
+      const day = model.normalizeDue(date);
+      if(!day || !canBackfill(day, logicalToday())){
+        throw new Error(`只能補登過去 ${BACKFILL_DAYS} 天內的日期`);
+      }
+      return markDaily(i, day);
     },
 
     deferStep(id){
@@ -505,6 +587,96 @@ export function createStore(backend = defaultBackend()){
         kind,
         order: model.nextOrder(data.steps.filter(s => s.id !== id), goalId),
       }));
+    },
+
+    // ── 手動調整（§4.4）─────────────────────────────────────────────────────
+    // 加分按鈕與直接輸入 XP 值都走這條路徑，變動一律留下 manual 紀錄。
+    // 技能 XP 不得低於 0：扣減量超過現有 XP 時只扣到 0，並以實際變動量記錄，
+    // 這樣 xpLog 的加總永遠等於目前 XP。
+    adjustSkillXp(skillId, delta){
+      const i = findSkill(skillId);
+      if(!Number.isSafeInteger(delta)) throw new Error("XP 變動量必須是整數");
+      const before = data.skills[i].xp;
+      const actual = Math.max(0, before + delta) - before;
+      // 什麼都沒變就不留紀錄，否則會在 activeDays 裡多出一個沒有活動的日子。
+      if(actual !== 0){
+        bumpSkill(skillId, actual);
+        addXpEntry({date: logicalToday(), skillId, xp: actual,
+                    source: model.XP_SOURCE.MANUAL});
+      }
+      commit();
+      return copySkill(data.skills[findSkill(skillId)]);
+    },
+
+    // 直接輸入目標值：寫入的是差額，不是新值本身。
+    setSkillXp(skillId, value){
+      const i = findSkill(skillId);
+      if(!Number.isSafeInteger(value) || value < 0){
+        throw new Error("技能 XP 必須是非負整數");
+      }
+      return store.adjustSkillXp(skillId, value - data.skills[i].xp);
+    },
+
+    // 事後指定核心（§4.3.1）：更新那筆紀錄的 skillId，不新增一筆，
+    // 否則同一次完成會被算兩次。
+    assignXpEntry(entryId, coreId){
+      const i = data.xpLog.findIndex(e => e.id === entryId);
+      if(i < 0) throw new Error(`找不到 xpLog：${entryId}`);
+      const entry = data.xpLog[i];
+      if(entry.skillId) throw new Error("這筆 XP 已經歸屬過了");
+      if(!data.cores.some(c => c.id === coreId)) throw new Error(`找不到 core：${coreId}`);
+      const skillId = model.generalSkillId(coreId);
+      findSkill(skillId);
+      bumpSkill(skillId, entry.xp);
+      data.profile = {...data.profile,
+                      unassignedXP: Math.max(0, data.profile.unassignedXP - entry.xp)};
+      data.xpLog = data.xpLog.map((e, n) => (n === i ? {...e, skillId} : e));
+      commit();
+      return copy(data.xpLog[i]);
+    },
+
+    // ── 合併技能（§4.5）─────────────────────────────────────────────────────
+    // 來源技能的 XP 相加轉入新技能，總 XP 不變。紀錄金額必須是 0：合併只是搬移
+    // 既有 XP，寫進實際金額會讓當天的成果數字整批膨脹。
+    mergeSkills({sourceIds = [], coreId, name, icon = "", desc = "", source = "",
+                 type = model.SKILL_TYPE.ACTIVE, notes = []} = {}){
+      const ids = [...new Set(sourceIds)];
+      const sources = ids.map(id => data.skills[findSkill(id)]);
+      if(sources.length < 2) throw new Error("合併至少需要兩個技能");
+      // 承接技能是系統產生的容器，隨核心存在，不能被合併掉。
+      if(sources.some(s => s.builtin)) throw new Error("承接技能不能參與合併");
+      const merged = model.createSkill({
+        coreId, name, icon, desc, source, type, notes,
+        xp: sources.reduce((a, s) => a + s.xp, 0),
+        mergedFrom: ids,
+        createdAt: new Date().toISOString(),
+      });
+      const gone = new Set(ids);
+      data.skills = [...data.skills.filter(s => !gone.has(s.id)), merged];
+      // 指向來源技能的獎勵改指新技能。留著會變成懸空參照，之後完成那個步驟時
+      // XP 會被判成未歸屬（§3.2 末段），等於合併把歸屬弄丟了。
+      data.steps = data.steps.map(s => {
+        if(!s.rewards.some(r => gone.has(r.skillId))) return s;
+        const seen = new Set();
+        const rewards = [];
+        for(const r of s.rewards){
+          const skillId = gone.has(r.skillId) ? merged.id : r.skillId;
+          // 同一個步驟同時獎勵兩個被合併的技能時，合併後會變成同一個 skillId：
+          // 併成一筆，不然那個步驟會平白多發一次。
+          if(seen.has(skillId)){
+            const at = rewards.find(x => x.skillId === skillId);
+            at.xp += r.xp;
+            continue;
+          }
+          seen.add(skillId);
+          rewards.push({skillId, xp: r.xp});
+        }
+        return {...s, rewards};
+      });
+      addXpEntry({date: logicalToday(), skillId: merged.id, xp: 0,
+                  source: model.XP_SOURCE.MERGE, refId: merged.id});
+      commit();
+      return copySkill(merged);
     },
 
     // ── 推導（轉呼叫 model，讓檢視只需要依賴 store）────────────────────────
@@ -581,6 +753,11 @@ export function createStore(backend = defaultBackend()){
             id,
             notes: normalizeLegacyNotes(raw.notes),
             builtin: false,
+            // XP 只由 XP 引擎改（§4）：既有技能一律沿用 store 裡的值，不吃 legacy
+            // 快照帶回來的數字。快照是載入當下的複本，中間若有任何一次發放，
+            // 拿它回寫就會把那些 XP 靜默還原，只留下 xpLog 那幾筆。
+            // 新技能沒有前一版可沿用（例如全新安裝的預設技能），才用帶進來的值。
+            xp: prev ? prev.xp : raw.xp,
             // legacy 的形狀帶不動這兩個欄位，沿用既有值才不會每存一次就抹掉一次。
             mergedFrom: prev ? prev.mergedFrom : (hasMergeNote(raw.notes) ? [] : null),
             createdAt: prev ? prev.createdAt : null,

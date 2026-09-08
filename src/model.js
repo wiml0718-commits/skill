@@ -107,7 +107,8 @@ function text(v){return typeof v === "string" ? v : "";}
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
-function normalizeDue(due){
+// 日期字串的唯一驗證入口：due、xpLog.date、streakHistory、補登日期都走它。
+export function normalizeDue(due){
   if(due === undefined || due === null || due === "") return null;
   if(typeof due !== "string" || !DATE_PATTERN.test(due)){
     throw new Error("due 必須是 YYYY-MM-DD 字串或 null");

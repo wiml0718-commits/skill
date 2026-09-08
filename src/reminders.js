@@ -6,16 +6,17 @@
 // 回到前景時更新——badge 會留在圖示上直到下次開啟，但通知不是背景鬧鐘。
 
 import {isActionable, GOAL_STATUS, STEP_KIND} from "./model.js";
+import {logicalToday} from "./rpg.js";
 
 export const DUE = {OVERDUE: "overdue", TODAY: "today", LATER: "later", NONE: "none"};
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
-// 用本地時區組出 YYYY-MM-DD。不能用 toISOString()，那是 UTC，
-// 在 UTC+8 的深夜會早一天翻頁，造成「今天到期」被誤判成逾期。
+// 「今天」一律走 §5.0 的邏輯日：本地時間減 4 小時再取日期。不能用
+// toISOString()，那是 UTC，在 UTC+8 的深夜會早一天翻頁；也不能直接取本地日期，
+// 凌晨 0-4 點的到期判定會跟 streak 與每日結算對不上。
 export function todayISO(d = new Date()){
-  const pad = n => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  return logicalToday(d);
 }
 
 export function classifyDue(due, today = todayISO()){

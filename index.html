@@ -340,24 +340,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 <script>
 // ── Data ─────────────────────────────────────────────────────────────────────
 const STORAGE_KEY = "skill-pwa-v1";
-// Lv1-99 thresholds: 50*i^2 + 50*i
-const LEVEL_XP = (()=>{const a=[0];for(let i=1;i<=99;i++)a.push(50*i*i+50*i);return a;})();
-const MAX_LV = 99;
 const SUB_MAX_LV = 9;
-const LV_NAMES = (()=>{
-  const tiers=[
-    [1,5,"初學者"],[6,10,"見習生"],[11,15,"實踐者"],[16,20,"熟練者"],
-    [21,25,"進階者"],[26,30,"資深者"],[31,35,"精英"],[36,40,"大師"],
-    [41,50,"宗師"],[51,60,"傳說"],[61,70,"神話"],[71,80,"至高"],
-    [81,90,"無敵"],[91,98,"超越者"],[99,99,"神域"]
-  ];
-  const arr=[""];
-  for(let i=1;i<=99;i++){
-    const t=tiers.find(([a,b])=>i>=a&&i<=b);
-    arr.push(t?t[2]:"神域");
-  }
-  return arr;
-})();
 const CORES = [
   {id:"body",    name:"身體管理", title:"John Wick",       icon:"🔫", color:"#ef4444"},
   {id:"emotion", name:"情緒管理", title:"明鏡止水",         icon:"🪞", color:"#22d3ee"},
@@ -419,22 +402,22 @@ function showToast(msg,duration=1800){
 }
 
 // ── Level helpers ─────────────────────────────────────────────────────────────
+// 等級曲線、階層名與進度都住在 src/model.js 與 src/rpg.js，這裡只轉呼叫，
+// 不再各自留一份公式（§4.1）。
 function getCoreXP(coreId){return state.subSkills.filter(s=>s.coreId===coreId).reduce((a,s)=>a+(s.xp||0),0);}
-function calcLv(xp){let lv=1;for(let i=1;i<=MAX_LV;i++){if(xp>=LEVEL_XP[i])lv=i;else break;}return Math.min(lv,MAX_LV);}
-function lvProgress(xp){
-  const lv=calcLv(xp);
-  if(lv>=MAX_LV)return{lv,pct:100,cur:xp-LEVEL_XP[MAX_LV],need:0};
-  const base=LEVEL_XP[lv],next=LEVEL_XP[lv+1];
-  return{lv,pct:Math.round((xp-base)/(next-base)*100),cur:xp-base,need:next-base};
-}
+function levelXp(i){return window.Goals.LEVEL_XP[i];}
+function maxLv(){return window.Goals.MAX_LV;}
+function calcLv(xp){return window.Goals.calcLv(xp);}
+function lvName(lv){return window.Goals.lvName(lv);}
+function lvProgress(xp){return window.Goals.levelProgress(xp);}
 
 // ── Streak helper ─────────────────────────────────────────────────────────────
 function calcStreak(q){
   // Returns current consecutive days streak for a daily quest
   if(q.type!=="daily"||!q.streakHistory)return q.completedCount?1:0;
-  const today=todayStr();
   let streak=0;
-  let check=new Date();
+  const [ty,tm,td]=todayStr().split("-").map(Number);
+  const check=new Date(ty,tm-1,td);
   // Walk backwards from today
   for(let i=0;i<365;i++){
     const d=`${check.getFullYear()}-${String(check.getMonth()+1).padStart(2,"0")}-${String(check.getDate()).padStart(2,"0")}`;
@@ -449,7 +432,7 @@ function calcStreak(q){
 function svgRing(xp,color,size=56){
   const r=(size-8)/2,circ=2*Math.PI*r;
   const {lv,pct}=lvProgress(xp);
-  const dash=circ*(lv>=MAX_LV?1:pct/100);
+  const dash=circ*(lv>=maxLv()?1:pct/100);
   return `<svg width="${size}" height="${size}">
     <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="#1e3a4a" stroke-width="4"/>
     <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="${color}" stroke-width="4"
@@ -548,13 +531,13 @@ function renderCoreList(){
             <div class="xp-bar" style="width:${pct}%;background:linear-gradient(90deg,${c.color}77,${c.color});box-shadow:0 0 6px ${c.color}"></div>
           </div>
           <div class="xp-label">
-            <span style="color:${c.color}">${LV_NAMES[lv]}</span>
-            <span>${lv<MAX_LV?`${cur}/${need} → Lv${lv+1}`:"Lv99 MAX"}</span>
+            <span style="color:${c.color}">${lvName(lv)}</span>
+            <span>${lv<maxLv()?`${cur}/${need} → Lv${lv+1}`:"Lv99 MAX"}</span>
           </div>
         </div>
         <div class="core-right">
           <div class="core-lv" style="color:${c.color};font-size:16px">Lv${lv}</div>
-          <div class="core-lv-lbl" style="color:${c.color};opacity:.7">${LV_NAMES[lv]}</div>
+          <div class="core-lv-lbl" style="color:${c.color};opacity:.7">${lvName(lv)}</div>
           <div class="core-lv-lbl" style="margin-top:3px">${subs} 技能</div>
         </div>
       </div>
@@ -582,7 +565,7 @@ function renderDetail(coreId){
       const ti=s.type==="active"?"⚡":"🛡️";
       const tl=s.type==="active"?"主動":"被動";
       const subLv=Math.min(calcLv(s.xp),SUB_MAX_LV);
-      const pct2=subLv<SUB_MAX_LV?Math.min((s.xp-LEVEL_XP[subLv])/(LEVEL_XP[subLv+1]-LEVEL_XP[subLv])*100,100):100;
+      const pct2=subLv<SUB_MAX_LV?lvProgress(s.xp).pct:100;
       const quickBtn=s.type==="active"
         ?`<button onclick="event.stopPropagation();quickAddXP('${s.id}')"
             style="flex-shrink:0;background:${tc}22;border:1px solid ${tc}66;color:${tc};
@@ -603,7 +586,7 @@ function renderDetail(coreId){
             <div class="sub-desc">${s.desc||""}</div>
             ${s.source?`<div class="sub-source" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">📚 ${s.source}</div>`:""}
             <div class="sub-xp-bar"><div class="sub-xp-fill" style="width:${pct2}%;background:linear-gradient(90deg,${c.color}66,${c.color});box-shadow:0 0 5px ${c.color}"></div></div>
-            <div class="sub-xp-row"><span style="color:var(--muted2)">EXP ${s.xp} / Lv${subLv<SUB_MAX_LV?subLv+1:"MAX"} 需 ${subLv<SUB_MAX_LV?LEVEL_XP[subLv+1]:LEVEL_XP[SUB_MAX_LV]}</span><span style="color:${c.color}">${subLv<SUB_MAX_LV?`→ 還差 ${LEVEL_XP[subLv+1]-s.xp}`:"Lv9 MAX ★"}</span></div>
+            <div class="sub-xp-row"><span style="color:var(--muted2)">EXP ${s.xp} / Lv${subLv<SUB_MAX_LV?subLv+1:"MAX"} 需 ${subLv<SUB_MAX_LV?levelXp(subLv+1):levelXp(SUB_MAX_LV)}</span><span style="color:${c.color}">${subLv<SUB_MAX_LV?`→ 還差 ${levelXp(subLv+1)-s.xp}`:"Lv9 MAX ★"}</span></div>
           </div>
         </div>
         ${s.notes&&s.notes.length?`<div style="color:var(--muted2);font-size:9px;margin-top:6px">📝 ${s.notes.length} 條筆記</div>`:""}
@@ -632,13 +615,13 @@ function renderDetail(coreId){
         </div>
         <div class="lv-ring-wrap">
           ${svgRing(xp,c.color,64)}
-          <div class="lv-ring-lbl" style="color:${c.color}">${LV_NAMES[lv]}</div>
+          <div class="lv-ring-lbl" style="color:${c.color}">${lvName(lv)}</div>
         </div>
       </div>
       <div class="xp-block">
         <div class="xp-block-top">
           <span>總 EXP：<span style="color:${c.color};font-family:'Cinzel',serif">${xp}</span></span>
-          <span>${lv<MAX_LV?`距 Lv${lv+1} 還需 ${need-cur} EXP`:"Lv99 已達神域！"}</span>
+          <span>${lv<maxLv()?`距 Lv${lv+1} 還需 ${need-cur} EXP`:"Lv99 已達神域！"}</span>
         </div>
         <div class="xp-big-bar">
           <div class="xp-big-fill" style="width:${pct}%;background:linear-gradient(90deg,${c.color}66,${c.color});box-shadow:0 0 10px ${c.color}"></div>
@@ -717,7 +700,7 @@ function renderProfile(){
       ${[1,5,10,15,20,25,30,40,50,60,70,80,90,98].map(i=>`
         <div class="stat-row">
           <span class="stat-lbl">Lv${i} → Lv${i+1}</span>
-          <span class="stat-val" style="color:var(--muted)">${LEVEL_XP[i+1].toLocaleString()} EXP</span>
+          <span class="stat-val" style="color:var(--muted)">${levelXp(i+1).toLocaleString()} EXP</span>
         </div>`).join("")}
       </div>
     </div>
@@ -1020,24 +1003,22 @@ function confirmMerge(fromCoreId){
   const descParts=sources.filter(s=>s.desc).map(s=>`${s.name}：${s.desc}`);
   const combinedDesc=desc||descParts.join("　|　");
 
-  // Create new merged skill
-  const newSkill={
-    id:"sk_"+Date.now(),
-    name,icon,
-    desc:combinedDesc,
-    type,
-    coreId:targetCoreId,
-    xp:totalXP,
-    source:uniqueSources,
-    notes:mergedNotes
-  };
-
-  // Remove source skills, add new one
-  const sourceIds=new Set(sources.map(s=>s.id));
-  state.subSkills=state.subSkills.filter(s=>!sourceIds.has(s.id));
-  state.subSkills.push(newSkill);
-
-  saveState(true);
+  // 合併交給 store：XP 相加轉入新技能、來源關係寫進 mergedFrom、留下一筆金額為
+  // 0 的 merge 紀錄（§4.5）。總 XP 不變，也不會讓當天的成果數字膨脹。
+  flushState();
+  try{
+    window.Goals.mergeSkills({
+      sourceIds:sources.map(s=>s.id),
+      coreId:targetCoreId,
+      name,icon,type,
+      desc:combinedDesc,
+      source:uniqueSources,
+      notes:mergedNotes,
+    });
+  }catch{
+    showToast("合併失敗，請重新整理再試");return;
+  }
+  loadState();
   closeMergeModal();
   // Navigate to the target core's detail page
   detailCore=targetCoreId;
@@ -1177,6 +1158,7 @@ function delNote(id){
 }
 function saveSub(){
   if(!modalData)return;
+  flushState();
   const d=modalData.data;
   d.name=document.getElementById("m-name")?.value?.trim()||"";
   if(!d.name)return;
@@ -1184,15 +1166,28 @@ function saveSub(){
   d.icon=document.getElementById("m-icon")?.value||"⭐";
   d.source=document.getElementById("m-source")?.value||"";
   const prevLv=d.id?calcLv(getCoreXP(d.coreId)):0;
-  d.xp=Math.max(0,parseInt(document.getElementById("m-xp")?.value)||0);
+  // XP 一律走 store 的發放路徑：這裡先保留原值，存完再以差額寫入一筆 manual
+  // 紀錄，xpLog 的加總才會永遠等於目前 XP（§4.4）。
+  const targetXp=Math.max(0,parseInt(document.getElementById("m-xp")?.value)||0);
   d.coreId=document.getElementById("m-core")?.value||d.coreId;
-  if(d.id){
-    state.subSkills=state.subSkills.map(s=>s.id===d.id?{...d}:s);
+  let id=d.id;
+  if(id){
+    d.xp=state.subSkills.find(s=>s.id===id)?.xp||0;
+    state.subSkills=state.subSkills.map(s=>s.id===id?{...d}:s);
   }else{
-    state.subSkills.push({...d,id:"sk_"+Date.now()});
+    id="sk_"+Date.now();
+    d.xp=0;
+    state.subSkills.push({...d,id});
   }
+  writeState();
+  try{
+    window.Goals.setSkillXp(id,targetXp);
+  }catch{
+    showToast("XP 沒有存進去，請重新整理再試",2500);
+  }
+  loadState();
   const newLv=calcLv(getCoreXP(d.coreId));
-  saveState();closeModal();render();
+  closeModal();render();showToast("✓ 已儲存");
   if(newLv>prevLv){
     const c=CORE_MAP[d.coreId];
     setTimeout(()=>showToast(`🎊 升級！${c.icon}${c.title} → Lv${newLv}！`,3000),400);
@@ -1295,9 +1290,15 @@ function quickAddXP(id){
   if(!s)return;
   const coreId=s.coreId;
   const prevLv=calcLv(getCoreXP(coreId));
-  s.xp=(s.xp||0)+10;
+  // 手動加分也是一筆 XP 變動，走 store 才會留下 manual 紀錄（§4.4）
+  flushState();
+  try{
+    window.Goals.adjustSkillXp(id,10);
+  }catch{
+    showToast("加分失敗，請重新整理再試");return;
+  }
+  loadState();
   const newLv=calcLv(getCoreXP(coreId));
-  saveState(true);
   // preserve scroll position
   const scrollTop=document.getElementById("content").scrollTop;
   render();
@@ -1333,7 +1334,9 @@ let questFilter = "all"; // all | main | side | daily | done | archive
 
 function renderQuests(){
   if(!state.quests)state.quests=[];
-  const now = new Date(); now.setHours(0,0,0,0);
+  // 到期標籤同樣以邏輯日為準（§5.0），否則凌晨 0-4 點卡片會說「逾期 1 天」，
+  // 提醒面板與 checkOverdue() 卻說今天到期。
+  const today = todayStr();
 
   // For daily: never truly "done", show all dailies under daily tab
   const isActive = q => q.type==="daily" ? true : !q.done && !q.archived;
@@ -1388,23 +1391,23 @@ function renderQuests(){
           <div style="flex:1;height:1px;background:linear-gradient(90deg,transparent,#f59e0b44)"></div>
         </div>`;
       }
-      return divider+renderQuestCard(q,now);
+      return divider+renderQuestCard(q,today);
     }).join("");
   } else if(questFilter==="daily"||questFilter==="all"){
     // Split daily into undone / done-today
     const dailyUndone=filtered.filter(q=>q.type==="daily"&&!isDailyDoneToday(q));
     const dailyDone=filtered.filter(q=>q.type==="daily"&&isDailyDoneToday(q));
     const others=filtered.filter(q=>q.type!=="daily");
-    const otherCards=others.map(q=>renderQuestCard(q,now)).join("");
-    const undoneCards=dailyUndone.map(q=>renderQuestCard(q,now)).join("");
+    const otherCards=others.map(q=>renderQuestCard(q,today)).join("");
+    const undoneCards=dailyUndone.map(q=>renderQuestCard(q,today)).join("");
     const doneCards=dailyDone.length>0
       ?`<div style="color:var(--muted);font-size:9px;letter-spacing:2px;margin:14px 0 8px;padding-left:2px">
           ✓ 今日已完成 (${dailyDone.length})
-        </div>${dailyDone.map(q=>renderQuestCard(q,now)).join("")}`
+        </div>${dailyDone.map(q=>renderQuestCard(q,today)).join("")}`
       :"";
     cards=otherCards+undoneCards+doneCards;
   } else {
-    cards=filtered.map(q=>renderQuestCard(q,now)).join("");
+    cards=filtered.map(q=>renderQuestCard(q,today)).join("");
   }
 
   const doneCnt=state.quests.filter(q=>q.done&&q.type!=="daily"&&!q.archived).length;
@@ -1439,12 +1442,11 @@ function renderQuests(){
     <button class="quest-add-fab" onclick="openAddQuest()">＋</button>`;
 }
 
-function renderQuestCard(q, now){
+function renderQuestCard(q, today){
   const qt = QUEST_TYPES[q.type]||QUEST_TYPES.side;
   let dueHtml="", isOverdue=false, isSoon=false;
   if(q.dueDate&&!q.done){
-    const due=new Date(q.dueDate); due.setHours(0,0,0,0);
-    const diff=Math.round((due-now)/(1000*60*60*24));
+    const diff=daysUntil(today,q.dueDate);
     isOverdue=diff<0;
     isSoon=diff>=0&&diff<=3;
     const dueLabel=isOverdue?`逾期 ${Math.abs(diff)} 天`
@@ -1521,9 +1523,14 @@ function renderQuestCard(q, now){
   </div>`;
 }
 
-function todayStr(){
-  const d=new Date();
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+// 日界凌晨 4:00（§5.0）。整個 app 只有這一個「今天」，由 src/rpg.js 提供。
+function todayStr(){return window.Goals.todayISO();}
+// 兩個 YYYY-MM-DD 相差幾天。用 UTC 做算術，避免日光節約時間讓某些日子變成
+// 23 或 25 小時；直接 new Date("YYYY-MM-DD") 則是 UTC 午夜，在負偏移的時區
+// 會整個早一天。
+function daysUntil(fromISO,toISO){
+  const at=iso=>{const[y,m,d]=String(iso).split("-").map(Number);return Date.UTC(y,m-1,d);};
+  return Math.round((at(toISO)-at(fromISO))/86400000);
 }
 function isDailyDoneToday(q){
   if(q.type!=="daily"||!q.lastCompletedDate)return false;
@@ -1535,34 +1542,25 @@ function completeQuest(id){
   if(q.type==="daily"&&isDailyDoneToday(q)){
     showToast("今日已完成，明天再來！");return;
   }
-  // Capture pre-completion levels for level-up detection
+  // 完成與 XP 發放都交給 store：狀態、streak、xpLog 與未歸屬 XP 在那裡一次處理
+  // （§4.2、§5.1），這裡只負責把結果講給使用者聽。
+  flushState();
   const prevLevels={};
   CORES.forEach(c=>{prevLevels[c.id]=calcLv(getCoreXP(c.id));});
-
-  // Mark done
-  if(q.type==="daily"){
-    const td=todayStr();
-    q.lastCompletedDate=td;
-    q.completedCount=(q.completedCount||0)+1;
-    // Record streak history (keep last 400 days max)
-    if(!q.streakHistory)q.streakHistory=[];
-    if(!q.streakHistory.includes(td))q.streakHistory.push(td);
-    if(q.streakHistory.length>400)q.streakHistory=q.streakHistory.slice(-400);
-  } else {
-    q.done=true;
-    q.completedAt=new Date().toISOString();
+  const before=new Map(state.subSkills.map(s=>[s.id,s.xp||0]));
+  try{
+    window.Goals.completeStep(id);
+  }catch{
+    showToast("完成失敗，請重新整理再試");return;
   }
-  // Multi-skill EXP rewards
-  const rewards=q.rewards&&q.rewards.length>0?q.rewards
-    :(q.rewardSkillId?[{skillId:q.rewardSkillId,xp:q.rewardXP||50}]:[]);
-  let msgs=[];
-  let levelUps=[];
-  rewards.forEach(r=>{
-    if(!r.skillId)return;
-    const s=state.subSkills.find(x=>x.id===r.skillId);
-    if(s){s.xp=(s.xp||0)+(r.xp||0);msgs.push(`${s.name}+${r.xp}`);}
+  loadState();
+
+  const msgs=[];
+  state.subSkills.forEach(s=>{
+    const gained=(s.xp||0)-(before.get(s.id)||0);
+    if(gained>0)msgs.push(`${s.name}+${gained}`);
   });
-  // E: detect core level-ups after XP applied
+  const levelUps=[];
   CORES.forEach(c=>{
     const newLv=calcLv(getCoreXP(c.id));
     if(newLv>prevLevels[c.id])levelUps.push(`${c.icon}${c.title} → Lv${newLv}！`);
@@ -1572,7 +1570,7 @@ function completeQuest(id){
   }
   if(msgs.length>0)showToast(`🎉 ${q.title} 完成！${msgs.join(" · ")}`);
   else showToast(`🎉 任務完成：${q.title}`);
-  saveState(true);render();
+  render();
 }
 
 function openAddQuest(){
@@ -1857,12 +1855,11 @@ function deleteQuest(id){
 // ── Check overdue & daily reset on app open (iOS-safe: no background timer dependency) ──
 function checkOverdue(){
   if(!state.quests)return;
-  const now=new Date();now.setHours(0,0,0,0);
-  const overdue=state.quests.filter(q=>{
-    if(q.done||q.type==="daily"||!q.dueDate)return false;
-    const due=new Date(q.dueDate);due.setHours(0,0,0,0);
-    return due<now;
-  });
+  // 逾期同樣以邏輯日為準（§5.0）。用當下的午夜判斷的話，凌晨 0-4 點這個提示會
+  // 說「已逾期」，提醒面板卻說「今日到期」，兩邊對不上。
+  const today=todayStr();
+  const overdue=state.quests.filter(q=>
+    !q.done&&q.type!=="daily"&&q.dueDate&&q.dueDate<today);
   if(overdue.length>0)showToast(`⚠️ 有 ${overdue.length} 個任務已逾期`,2500);
 
   // D: Today summary - count pending daily quests
