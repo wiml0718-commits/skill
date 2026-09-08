@@ -1389,8 +1389,8 @@ function renderQuests(){
   const filtered=steps.filter(s=>{
     if(questFilter==="done")    return s.state===DONE_STATE&&s.kind!=="daily"&&!s.archived;
     if(questFilter==="archive") return s.archived===true;
-    if(questFilter==="daily")   return s.kind==="daily"&&!s.archived;
     if(questFilter==="all")     return isOpen(s);
+    // 每日分頁沒有自己的規則：走同一個 isOpen，才不會漏掉封存目標的範圍檢查
     return isOpen(s)&&s.kind===questFilter;
   });
 
@@ -1398,7 +1398,7 @@ function renderQuests(){
     all:     steps.filter(isOpen).length,
     main:    steps.filter(s=>isOpen(s)&&s.kind==="main").length,
     side:    steps.filter(s=>isOpen(s)&&s.kind==="side").length,
-    daily:   steps.filter(s=>s.kind==="daily"&&!s.archived).length,
+    daily:   steps.filter(s=>isOpen(s)&&s.kind==="daily").length,
     inbox:   steps.filter(s=>isOpen(s)&&s.kind==="inbox").length,
     done:    steps.filter(s=>s.state===DONE_STATE&&s.kind!=="daily"&&!s.archived).length,
     archive: steps.filter(s=>s.archived===true).length,
