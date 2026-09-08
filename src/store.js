@@ -345,9 +345,11 @@ export function createStore(backend = defaultBackend()){
       completedCount: step.completedCount + 1,
       lastCompletedDate: !step.lastCompletedDate || day > step.lastCompletedDate
         ? day : step.lastCompletedDate,
-      // 遷移進來的 daily 可能停在 DONE（legacy 的 done: true）。每日任務不進
-      // DONE，隔天自然又是待辦。
-      state: step.state === model.STEP_STATE.DONE ? model.STEP_STATE.TODO : step.state,
+      // 打卡完就是下一次的開始：狀態回到待辦、順延計數歸零（§5.1）。遷移進來
+      // 停在 DONE 的、或從順延中的任務改過來的，都在這裡收斂——留著舊狀態會讓
+      // 它打不了卡，留著舊的 deferCount 會讓它一直被回顧當成「反覆順延」。
+      state: model.STEP_STATE.TODO,
+      deferCount: 0,
     });
     grantForStep(next, day);
     return replaceStep(i, next);
@@ -514,10 +516,13 @@ export function createStore(backend = defaultBackend()){
       if(patch.goalId !== undefined && patch.goalId !== null) findGoal(patch.goalId);
       const step = model.createStep({...prev, ...patch, id});
       requireAttribution(step);
-      // 把已完成的任務改成每日時，DONE 要拉回待辦：每日任務不進 DONE（§5.1），
-      // 留著會變成一個永遠打不了卡、只能封存的每日任務。
-      if(step.kind === model.STEP_KIND.DAILY && step.state === model.STEP_STATE.DONE){
+      // 每日任務只有「今天做了沒」，沒有完成、順延或已排程可言（§5.1）。改成
+      // daily 時一律拉回待辦、順延計數歸零：留著 DONE 會變成一個打不了卡、只能
+      // 封存的每日任務，留著 `>` 與舊的 deferCount 則會讓它永遠掛在回顧的
+      // 「反覆順延」清單上。
+      if(step.kind === model.STEP_KIND.DAILY){
         step.state = model.STEP_STATE.TODO;
+        step.deferCount = 0;
       }
       return replaceStep(i, step);
     },

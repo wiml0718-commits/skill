@@ -231,3 +231,31 @@ test("遷移進來還停在 DONE 的每日任務不會被批次封存掃走", ()
   // 完成一次就會被拉回待辦（markDaily）
   assert.equal(store.completeStep(s.id).state, m.STEP_STATE.TODO);
 });
+
+test("順延中的任務改成每日時，狀態與順延計數一起歸零", () => {
+  const store = fresh();
+  const goal = store.addGoal({title: "跑完半馬", coreId: "body"});
+  const s = store.addStep({goalId: goal.id, kind: m.STEP_KIND.MAIN, title: "晨跑"});
+  for(let i = 0; i < 3; i++) store.deferStep(s.id);
+  assert.equal(store.reviewItems("2026-09-08").stalling.length, 1, "順延三次就會進回顧");
+
+  const daily = store.updateStep(s.id, {kind: m.STEP_KIND.DAILY});
+  assert.equal(daily.state, m.STEP_STATE.TODO);
+  assert.equal(daily.deferCount, 0, "每日任務沒有順延可言，舊計數不該跟著走");
+  assert.equal(store.reviewItems("2026-09-08").stalling.length, 0,
+    "不歸零的話它會永遠掛在「反覆順延」清單上");
+});
+
+test("每日任務打卡之後回到待辦，順延計數也歸零", () => {
+  const store = fresh();
+  const s = store.addStep({kind: m.STEP_KIND.DAILY, title: "喝水", rewards: REWARD});
+  store.deferStep(s.id);
+  store.deferStep(s.id);
+  store.deferStep(s.id);
+  assert.equal(stepsOf(store)[0].deferCount, 3);
+
+  const after = store.completeStep(s.id);
+  assert.equal(after.state, m.STEP_STATE.TODO, "打卡完就是下一次的開始");
+  assert.equal(after.deferCount, 0);
+  assert.equal(store.reviewItems("2026-09-08").stalling.length, 0);
+});
