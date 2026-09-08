@@ -476,6 +476,8 @@ const api = {
   assignStep(id, goalId){return store.assignStep(id, goalId);},
   calcStreak,
   shiftDate,
+  // 任務頁把步驟塞進 innerHTML，跟這裡走同一個跳脫函式，不各自寫一份
+  esc,
   KIND_DEFAULT_XP,
   BACKFILL_DAYS,
   // 歸屬的提問只寫一次：任務頁與目標頁走同一個流程（§4.3）

@@ -404,7 +404,17 @@ function showToast(msg,duration=1800){
 // ── Level helpers ─────────────────────────────────────────────────────────────
 // 等級曲線、階層名與進度都住在 src/model.js 與 src/rpg.js，這裡只轉呼叫，
 // 不再各自留一份公式（§4.1）。
-function getCoreXP(coreId){return state.subSkills.filter(s=>s.coreId===coreId).reduce((a,s)=>a+(s.xp||0),0);}
+// 核心 XP = 底下所有技能的總和，包含承接技能「歷練」（§4.3）。歷練不投影進
+// legacy 快照（它是系統產生的容器，不該出現在技能清單裡），但它的 XP 是真的，
+// 少算會讓等級、雷達圖與完成回饋跟 store 對不上，所以直接向 store 要。
+function generalXP(coreId){
+  const sk=window.Goals.listSkills().find(x=>x.id===`sk_${coreId}_general`);
+  return sk?sk.xp||0:0;
+}
+function getCoreXP(coreId){
+  return state.subSkills.filter(s=>s.coreId===coreId).reduce((a,s)=>a+(s.xp||0),0)
+    +generalXP(coreId);
+}
 function levelXp(i){return window.Goals.LEVEL_XP[i];}
 function maxLv(){return window.Goals.MAX_LV;}
 function calcLv(xp){return window.Goals.calcLv(xp);}
@@ -540,6 +550,23 @@ function renderDetail(coreId){
     `<div class="lv-dot" style="width:${i<=lv?9:7}px;height:${i<=lv?9:7}px;background:${i<=lv?c.color:"#1e3a4a"};${i<=lv?`box-shadow:0 0 5px ${c.color}`:""}" title="Lv${i}"></div>`
   ).join("");
 
+  // 承接技能「歷練」：沒有指定技能的行動累積在這裡（§4.3）。它是系統產生的
+  // 容器，不能編輯也不單獨刪除，所以只讀地列出來——否則核心總 EXP 會比下面
+  // 這串加起來多，看的人只會覺得數字有問題。
+  const generalXp=generalXP(coreId);
+  const generalCard=generalXp>0
+    ?`<div class="sub-card" style="opacity:.85">
+        <div class="sub-row">
+          <div class="sub-icon">✨</div>
+          <div style="flex:1;min-width:0">
+            <span class="sub-name">歷練</span>
+            <div class="sub-desc">沒有指定技能的行動累積在這裡</div>
+            <div class="sub-xp-row"><span style="color:var(--muted2)">EXP ${generalXp}</span></div>
+          </div>
+        </div>
+      </div>`
+    :"";
+
   const subCards=subs.length===0
     ?`<div class="empty-state">尚未加入子技能<br><small>每個子技能的 EXP 都會累計到此核心技能</small></div>`
     :subs.map(s=>{
@@ -620,7 +647,7 @@ function renderDetail(coreId){
           onclick="openAddSub('${coreId}')">+ 新增</button>
       </div>
     </div>
-    ${subCards}
+    ${generalCard}${subCards}
     <div style="height:10px"></div>
   `;
 }
@@ -1319,6 +1346,10 @@ const ACTIONABLE_STATES = new Set(["•", "<", ">"]);
 
 let questFilter = "all"; // all | main | side | daily | inbox | done | archive
 
+// 使用者輸入會被塞進 innerHTML，一律先跳脫。匯入的備份也可能帶進標記，
+// 所以這不只是顯示問題（src/views.js 用的是同一個函式）。
+function esc(v){return window.Goals.esc(v);}
+
 function stepMeta(s){return KIND_META[s.kind]||KIND_META.side;}
 function isActionableStep(s){return !s.archived&&ACTIONABLE_STATES.has(s.state);}
 function isDailyDoneToday(s){
@@ -1463,14 +1494,14 @@ function renderQuestCard(s, today){
   const rewardHtml=s.rewards.length>0
     ?s.rewards.map(r=>{
         const sk=skillById(r.skillId);
-        return sk?`<span class="quest-reward">🎯 ${sk.icon||""} ${sk.name} +${r.xp} EXP</span>`:"";
+        return sk?`<span class="quest-reward">🎯 ${esc(sk.icon)} ${esc(sk.name)} +${r.xp} EXP</span>`:"";
       }).join("")
     :s.goalId
     ?`<span class="quest-reward" style="color:var(--muted2)">🎯 依目標歸屬</span>`
     :`<span class="quest-reward" style="color:var(--muted2)">尚未指定歸屬</span>`;
 
   const goalLabel=s.goalId
-    ?`<span style="font-size:9px;color:var(--muted2)">🎯 ${goalTitle(s.goalId)}</span>`:"";
+    ?`<span style="font-size:9px;color:var(--muted2)">🎯 ${esc(goalTitle(s.goalId))}</span>`:"";
 
   const isDailyDone=isDailyDoneToday(s);
   const cardDone=isDone||isDailyDone;
@@ -1499,8 +1530,8 @@ function renderQuestCard(s, today){
         ${goalLabel}
         ${createdLabel}
       </div>
-      <div class="quest-title ${cardDone?"done-strike":""}">${s.title}</div>
-      ${s.desc?`<div class="quest-desc">${s.desc}</div>`:""}
+      <div class="quest-title ${cardDone?"done-strike":""}">${esc(s.title)}</div>
+      ${s.desc?`<div class="quest-desc">${esc(s.desc)}</div>`:""}
       <div class="quest-meta">
         <div style="display:flex;flex-direction:column;gap:3px">
           ${rewardHtml}
@@ -1555,7 +1586,8 @@ function completeQuest(id){
   flushState();
   const prevLevels={};
   CORES.forEach(c=>{prevLevels[c.id]=calcLv(getCoreXP(c.id));});
-  const before=new Map(state.subSkills.map(x=>[x.id,x.xp||0]));
+  // 用 store 的完整技能清單比對：歸到「歷練」的 XP 也要講出來
+  const before=new Map(window.Goals.listSkills().map(x=>[x.id,x.xp||0]));
   try{
     window.Goals.completeStep(id);
   }catch{
@@ -1572,7 +1604,7 @@ function completeQuest(id){
   loadState();
 
   const msgs=[];
-  state.subSkills.forEach(x=>{
+  window.Goals.listSkills().forEach(x=>{
     const gained=(x.xp||0)-(before.get(x.id)||0);
     if(gained>0)msgs.push(`${x.name}+${gained}`);
   });
@@ -1642,18 +1674,18 @@ function showQuestModal(s){
       <input type="hidden" id="q-type" value="${kind}"/>
 
       <label class="form-label">任務名稱 *</label>
-      <input class="form-input" id="q-title" value="${s?.title||""}" placeholder="例：完成《原子習慣》第一章"/>
+      <input class="form-input" id="q-title" value="${esc(s?.title)}" placeholder="例：完成《原子習慣》第一章"/>
 
       <label class="form-label">描述</label>
       <textarea class="form-input" id="q-desc" rows="2"
         style="resize:none;height:60px;line-height:1.5"
-        placeholder="任務目標或備注...">${s?.desc||""}</textarea>
+        placeholder="任務目標或備注...">${esc(s?.desc)}</textarea>
 
       <label class="form-label">截止日期與時間</label>
       <div style="display:flex;gap:8px;margin-bottom:14px">
-        <input class="form-input" type="date" id="q-due" value="${s?.due||""}"
+        <input class="form-input" type="date" id="q-due" value="${esc(s?.due)}"
           style="margin-bottom:0;flex:1.4"/>
-        <input class="form-input" type="time" id="q-due-time" value="${s?.dueTime||""}"
+        <input class="form-input" type="time" id="q-due-time" value="${esc(s?.dueTime)}"
           style="margin-bottom:0;flex:1" placeholder="選填時間"/>
       </div>
 
@@ -1670,7 +1702,7 @@ function showQuestModal(s){
       <div style="display:flex;gap:6px;margin-bottom:6px">
         <select class="form-select" id="core-pick-select" style="margin-bottom:0;flex:1">
           <option value="">或直接記到某個核心的「歷練」…</option>
-          ${window.Goals.listCores().map(c=>`<option value="${c.id}">${c.icon||""} ${c.title||c.name}</option>`).join("")}
+          ${window.Goals.listCores().map(c=>`<option value="${esc(c.id)}">${esc(c.icon)} ${esc(c.title||c.name)}</option>`).join("")}
         </select>
         <button onclick="addRewardCoreFromSelect()"
           style="background:#22d3ee22;border:1px solid #22d3ee66;color:#22d3ee;
@@ -1712,8 +1744,8 @@ function renderRewardList(){
           +';border-radius:5px;padding:3px 8px;cursor:pointer;font-size:10px">'+v+'</button>';
       }).join("");
       rows+='<div class="reward-skill-row">'
-        +'<span class="reward-skill-name">'+(sk.icon||"")+" "+sk.name
-        +'<span style="color:var(--muted2);font-size:9px"> ('+(c?c.title||c.name:"")+")</span></span>"
+        +'<span class="reward-skill-name">'+esc(sk.icon)+" "+esc(sk.name)
+        +'<span style="color:var(--muted2);font-size:9px"> ('+esc(c?c.title||c.name:"")+")</span></span>"
         +'<div style="display:flex;gap:3px;flex-shrink:0">'+xpBtns+'</div>'
         +'<button class="reward-del" onclick="_modalRewards.splice('+i+',1);renderRewardList();refreshSkillSelect()">✕</button>'
         +'</div>';
@@ -1730,7 +1762,7 @@ function refreshSkillSelect(){
   sel.innerHTML=`<option value="">選擇需要的子技能…</option>`
     +available.map(s=>{
       const c=CORE_MAP[s.coreId];
-      return `<option value="${s.id}">${s.icon||""} ${s.name} (${c?c.title||c.name:""})</option>`;
+      return `<option value="${esc(s.id)}">${esc(s.icon)} ${esc(s.name)} (${esc(c?c.title||c.name:"")})</option>`;
     }).join("");
 }
 
