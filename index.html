@@ -1377,8 +1377,15 @@ function renderQuests(){
   // 就形同虛設。沒有目標的主線（遷移進來的舊任務）不受這條限制。
   const nextIds=new Set(window.Goals.nextStepIds());
   const inSequence=s=>s.kind!=="main"||!s.goalId||nextIds.has(s.id);
+  // 目標封存或完成之後，它底下的步驟就不該再出現在待辦裡——今日、回顧與到期
+  // 提醒都已經只看進行中的目標，任務頁不跟上就會變成繼續替一個收掉的目標賺 XP
+  // 的側門。完成與封存分頁不套這條，紀錄要留得住。
+  const activeGoals=new Set(window.Goals.listGoals()
+    .filter(g=>g.status==="active").map(g=>g.id));
+  const inScope=s=>!s.goalId||activeGoals.has(s.goalId);
   // 每日任務不進 DONE（§5.1），所以「進行中」對它來說永遠成立（除非封存）。
-  const isOpen=s=>(s.kind==="daily"?!s.archived:isActionableStep(s))&&inSequence(s);
+  const isOpen=s=>(s.kind==="daily"?!s.archived:isActionableStep(s))
+    &&inSequence(s)&&inScope(s);
   const filtered=steps.filter(s=>{
     if(questFilter==="done")    return s.state===DONE_STATE&&s.kind!=="daily"&&!s.archived;
     if(questFilter==="archive") return s.archived===true;
@@ -1940,7 +1947,11 @@ function checkOverdue(){
   // 逾期同樣以邏輯日為準（§5.0）。用當下的午夜判斷的話，凌晨 0-4 點這個提示會
   // 說「已逾期」，提醒面板卻說「今日到期」，兩邊對不上。
   const today=todayStr();
-  const steps=window.Goals.listSteps();
+  // 只算使用者還看得到的：進行中目標底下的，加上沒有目標的。封存或完成的目標
+  // 底下的步驟不會出現在任何清單上，也就不該替它們發逾期提示。
+  const activeGoals=new Set(window.Goals.listGoals()
+    .filter(g=>g.status==="active").map(g=>g.id));
+  const steps=window.Goals.listSteps().filter(s=>!s.goalId||activeGoals.has(s.goalId));
   const overdue=steps.filter(s=>
     s.kind!=="daily"&&s.due&&s.due<today&&isActionableStep(s));
   if(overdue.length>0)showToast(`⚠️ 有 ${overdue.length} 個任務已逾期`,2500);
