@@ -474,6 +474,14 @@ const api = {
   archiveDoneSteps(){return store.archiveDoneSteps();},
   deleteStepsWhere(pred){return store.deleteSteps(pred);},
   assignStep(id, goalId){return store.assignStep(id, goalId);},
+  // 每個目標同時只有一個下一步（§3.5）。任務頁靠這份清單決定帶目標的主線
+  // 要露出哪一個，不然它會把整條主線攤開，順序就形同虛設。
+  nextStepIds(){
+    return store.getState().goals
+      .map(g => store.nextStep(g.id))
+      .filter(Boolean)
+      .map(s => s.id);
+  },
   calcStreak,
   shiftDate,
   // 任務頁把步驟塞進 innerHTML，跟這裡走同一個跳脫函式，不各自寫一份

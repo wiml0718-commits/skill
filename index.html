@@ -1372,8 +1372,13 @@ function renderQuests(){
   const today=todayStr();
   const steps=window.Goals.listSteps();
 
+  // 帶目標的主線只露出該目標當下的「下一步」（§3.5）。把整條主線攤開的話，
+  // 使用者可以跳過順序先完成後面的步驟並拿到 XP，目標頁維持的「一次一步」
+  // 就形同虛設。沒有目標的主線（遷移進來的舊任務）不受這條限制。
+  const nextIds=new Set(window.Goals.nextStepIds());
+  const inSequence=s=>s.kind!=="main"||!s.goalId||nextIds.has(s.id);
   // 每日任務不進 DONE（§5.1），所以「進行中」對它來說永遠成立（除非封存）。
-  const isOpen=s=>s.kind==="daily"?!s.archived:isActionableStep(s);
+  const isOpen=s=>(s.kind==="daily"?!s.archived:isActionableStep(s))&&inSequence(s);
   const filtered=steps.filter(s=>{
     if(questFilter==="done")    return s.state===DONE_STATE&&s.kind!=="daily"&&!s.archived;
     if(questFilter==="archive") return s.archived===true;
