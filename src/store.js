@@ -820,12 +820,14 @@ export function createStore(backend = defaultBackend()){
         data.skills.filter(s => s.builtin && coreIds.has(s.coreId)));
       const liveSkillIds = new Set(data.skills.map(s => s.id));
 
+      // 指向已移除技能的 reward 一併清掉，不留懸空參照（§3.2）。刪除核心只是
+      // 其中一種來源：單獨刪掉一個子技能同樣會讓 reward 指向不存在的技能，
+      // 那個步驟完成時 XP 會靜默走未歸屬路徑，所以不能只在 coreRemoved 時清。
+      data.steps = data.steps.map(s => {
+        const rewards = s.rewards.filter(r => liveSkillIds.has(r.skillId));
+        return rewards.length === s.rewards.length ? s : {...s, rewards};
+      });
       if(coreRemoved){
-        // 指向已移除技能的 reward 一併清掉，不留懸空參照（§3.2）
-        data.steps = data.steps.map(s => {
-          const rewards = s.rewards.filter(r => liveSkillIds.has(r.skillId));
-          return rewards.length === s.rewards.length ? s : {...s, rewards};
-        });
         data.goals = data.goals.map(g =>
           (g.coreId && !coreIds.has(g.coreId)) ? {...g, coreId: null} : g);
       }
