@@ -445,9 +445,10 @@ test("核心顏色只收十六進位色碼，認不得的換成預設色", () =>
   const core = c => m.createCore({id: "core_1", name: "測試", order: 0, color: c});
 
   assert.equal(core("#ef4444").color, "#ef4444");
-  assert.equal(core("#FFF").color, "#FFF");
-  assert.equal(core("#12345678").color, "#12345678");
   assert.equal(core("  #10b981  ").color, "#10b981");
+  // 三位數展開成六位：畫面上會在色碼後面接透明度，`#fff` + `15` 是無效值
+  assert.equal(core("#fff").color, "#ffffff");
+  assert.equal(core("#F0A").color, "#FF00AA");
 
   // 顏色會被插進 inline style，HTML 跳脫不會動到 CSS 的 `;` `:` `(`：
   // 一串合法的 CSS 宣告照樣過得去，所以擋在建立實體這一關。
@@ -456,6 +457,9 @@ test("核心顏色只收十六進位色碼，認不得的換成預設色", () =>
   assert.equal(core("red").color, m.DEFAULT_CORE_COLOR);
   assert.equal(core("rgb(1,2,3)").color, m.DEFAULT_CORE_COLOR);
   assert.equal(core("#12345").color, m.DEFAULT_CORE_COLOR, "位數不對就不是色碼");
+  // 帶 alpha 的寫法不收：接上透明度之後同樣是無效值
+  assert.equal(core("#ffff").color, m.DEFAULT_CORE_COLOR);
+  assert.equal(core("#12345678").color, m.DEFAULT_CORE_COLOR);
   assert.equal(core("#gggggg").color, m.DEFAULT_CORE_COLOR);
   assert.equal(core("").color, m.DEFAULT_CORE_COLOR);
   assert.equal(core(undefined).color, m.DEFAULT_CORE_COLOR);
