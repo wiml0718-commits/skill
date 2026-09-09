@@ -196,6 +196,17 @@ export function createProfile({charName = "冒險者", createdAt = null,
   };
 }
 
+// 顏色會被直接插進 inline style。HTML 跳脫擋不住 CSS 的分隔字元（`;` `:` `(`），
+// 所以 `esc()` 之後仍然可以塞進整串宣告；匯入的備份是不受信任的輸入。收斂成
+// 十六進位色碼是在建立實體時就做完，而不是留給每個渲染點各自判斷。
+export const DEFAULT_CORE_COLOR = "#4a9eff";
+const HEX_COLOR = /^#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
+
+export function normalizeColor(v){
+  const s = text(v).trim();
+  return HEX_COLOR.test(s) ? s : DEFAULT_CORE_COLOR;
+}
+
 export function createCore({id, name, title = "", icon = "", color = "",
                             order, builtin} = {}){
   const coreId = requireId(id, "core");
@@ -205,7 +216,7 @@ export function createCore({id, name, title = "", icon = "", color = "",
     name: requireTitle(name),
     title: text(title).trim(),
     icon: text(icon),
-    color: text(color),
+    color: normalizeColor(color),
     order,
     builtin: typeof builtin === "boolean" ? builtin : isBuiltinCoreId(coreId),
   };
