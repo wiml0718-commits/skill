@@ -422,17 +422,18 @@ function lvName(lv){return window.Goals.lvName(lv);}
 function lvProgress(xp){return window.Goals.levelProgress(xp);}
 
 function svgRing(xp,color,size=56){
+  const col=esc(color);
   const r=(size-8)/2,circ=2*Math.PI*r;
   const {lv,pct}=lvProgress(xp);
   const dash=circ*(lv>=maxLv()?1:pct/100);
   return `<svg width="${size}" height="${size}">
     <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="#1e3a4a" stroke-width="4"/>
-    <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="${color}" stroke-width="4"
+    <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="${col}" stroke-width="4"
       stroke-dasharray="${dash} ${circ}" stroke-linecap="round"
       transform="rotate(-90 ${size/2} ${size/2})"
-      style="filter:drop-shadow(0 0 4px ${color})"/>
+      style="filter:drop-shadow(0 0 4px ${col})"/>
     <text x="${size/2}" y="${size/2+1}" text-anchor="middle" dominant-baseline="middle"
-      fill="${color}" font-size="14" font-weight="700" font-family="monospace">${lv}</text>
+      fill="${col}" font-size="14" font-weight="700" font-family="monospace">${lv}</text>
   </svg>`;
 }
 
@@ -496,6 +497,7 @@ function renderCoreList(){
       ✦ 新增核心技能
     </button></div>`;
   return addBtn+CORES.map(c=>{
+    const col=esc(c.color);
     const xp=getCoreXP(c.id);
     const {lv,pct,cur,need}=lvProgress(xp);
     const subs=state.subSkills.filter(s=>s.coreId===c.id).length;
@@ -504,32 +506,32 @@ function renderCoreList(){
       ?`<div style="display:flex;gap:5px;margin-top:9px;flex-wrap:wrap" onclick="event.stopPropagation()">
           ${activeSubs.map(s=>`
             <button onclick="quickAddXP('${s.id}')"
-              style="background:${c.color}15;border:1px solid ${c.color}44;color:${c.color};
+              style="background:${col}15;border:1px solid ${col}44;color:${col};
               border-radius:7px;padding:4px 9px;cursor:pointer;font-size:10px;
               font-family:'Share Tech Mono',monospace;white-space:nowrap">
-              ${s.icon||"⚡"} ${s.name} +10
+              ${esc(s.icon||"⚡")} ${esc(s.name)} +10
             </button>`).join("")}
         </div>`
       :"";
-    return `<div class="core-card" style="--card-color:${c.color};--card-color-faint:${c.color}11"
+    return `<div class="core-card" style="--card-color:${col};--card-color-faint:${col}11"
       onclick="openDetail('${c.id}')">
       <div class="core-card-bg"></div>
       <div class="core-row">
-        <div class="core-icon">${c.icon}</div>
+        <div class="core-icon">${esc(c.icon)}</div>
         <div class="core-info">
-          <div class="core-name">${c.title}</div>
-          <div class="core-title" style="color:${c.color};opacity:0.6;font-size:9px">${c.name}</div>
+          <div class="core-name">${esc(c.title)}</div>
+          <div class="core-title" style="color:${col};opacity:0.6;font-size:9px">${esc(c.name)}</div>
           <div class="xp-bar-wrap" style="margin-top:6px">
-            <div class="xp-bar" style="width:${pct}%;background:linear-gradient(90deg,${c.color}77,${c.color});box-shadow:0 0 6px ${c.color}"></div>
+            <div class="xp-bar" style="width:${pct}%;background:linear-gradient(90deg,${col}77,${col});box-shadow:0 0 6px ${col}"></div>
           </div>
           <div class="xp-label">
-            <span style="color:${c.color}">${lvName(lv)}</span>
+            <span style="color:${col}">${lvName(lv)}</span>
             <span>${lv<maxLv()?`${cur}/${need} → Lv${lv+1}`:"Lv99 MAX"}</span>
           </div>
         </div>
         <div class="core-right">
-          <div class="core-lv" style="color:${c.color};font-size:16px">Lv${lv}</div>
-          <div class="core-lv-lbl" style="color:${c.color};opacity:.7">${lvName(lv)}</div>
+          <div class="core-lv" style="color:${col};font-size:16px">Lv${lv}</div>
+          <div class="core-lv-lbl" style="color:${col};opacity:.7">${lvName(lv)}</div>
           <div class="core-lv-lbl" style="margin-top:3px">${subs} 技能</div>
         </div>
       </div>
@@ -543,11 +545,12 @@ function openDetail(coreId){detailCore=coreId;render();}
 
 function renderDetail(coreId){
   const c=CORE_MAP[coreId];
+  const col=esc(c.color);
   const xp=getCoreXP(coreId);
   const {lv,pct,cur,need}=lvProgress(xp);
   const subs=state.subSkills.filter(s=>s.coreId===coreId);
   const dots=[1,2,3,4,5,6,7,8,9].map(i=>
-    `<div class="lv-dot" style="width:${i<=lv?9:7}px;height:${i<=lv?9:7}px;background:${i<=lv?c.color:"#1e3a4a"};${i<=lv?`box-shadow:0 0 5px ${c.color}`:""}" title="Lv${i}"></div>`
+    `<div class="lv-dot" style="width:${i<=lv?9:7}px;height:${i<=lv?9:7}px;background:${i<=lv?col:"#1e3a4a"};${i<=lv?`box-shadow:0 0 5px ${col}`:""}" title="Lv${i}"></div>`
   ).join("");
 
   // 承接技能「歷練」：沒有指定技能的行動累積在這裡（§4.3）。它是系統產生的
@@ -583,19 +586,19 @@ function renderDetail(coreId){
         :"";
       return `<div class="sub-card" onclick="editSub('${s.id}')">
         <div class="sub-row">
-          <div class="sub-icon">${s.icon}</div>
+          <div class="sub-icon">${esc(s.icon)}</div>
           <div style="flex:1;min-width:0">
             <div style="display:flex;align-items:center;justify-content:space-between;gap:6px">
-              <span class="sub-name">${s.name} <span style="color:${c.color};font-size:11px;font-family:'Cinzel',serif">Lv${subLv}</span></span>
+              <span class="sub-name">${esc(s.name)} <span style="color:${col};font-size:11px;font-family:'Cinzel',serif">Lv${subLv}</span></span>
               <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
                 ${quickBtn}
                 <span class="type-badge" style="color:${tc};background:${tc}18;border:1px solid ${tc}44">${ti} ${tl}</span>
               </div>
             </div>
-            <div class="sub-desc">${s.desc||""}</div>
-            ${s.source?`<div class="sub-source" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">📚 ${s.source}</div>`:""}
-            <div class="sub-xp-bar"><div class="sub-xp-fill" style="width:${pct2}%;background:linear-gradient(90deg,${c.color}66,${c.color});box-shadow:0 0 5px ${c.color}"></div></div>
-            <div class="sub-xp-row"><span style="color:var(--muted2)">EXP ${s.xp} / Lv${subLv<SUB_MAX_LV?subLv+1:"MAX"} 需 ${subLv<SUB_MAX_LV?levelXp(subLv+1):levelXp(SUB_MAX_LV)}</span><span style="color:${c.color}">${subLv<SUB_MAX_LV?`→ 還差 ${levelXp(subLv+1)-s.xp}`:"Lv9 MAX ★"}</span></div>
+            <div class="sub-desc">${esc(s.desc||"")}</div>
+            ${s.source?`<div class="sub-source" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">📚 ${esc(s.source)}</div>`:""}
+            <div class="sub-xp-bar"><div class="sub-xp-fill" style="width:${pct2}%;background:linear-gradient(90deg,${col}66,${col});box-shadow:0 0 5px ${col}"></div></div>
+            <div class="sub-xp-row"><span style="color:var(--muted2)">EXP ${s.xp} / Lv${subLv<SUB_MAX_LV?subLv+1:"MAX"} 需 ${subLv<SUB_MAX_LV?levelXp(subLv+1):levelXp(SUB_MAX_LV)}</span><span style="color:${col}">${subLv<SUB_MAX_LV?`→ 還差 ${levelXp(subLv+1)-s.xp}`:"Lv9 MAX ★"}</span></div>
           </div>
         </div>
         ${s.notes&&s.notes.length?`<div style="color:var(--muted2);font-size:9px;margin-top:6px">📝 ${s.notes.length} 條筆記</div>`:""}
@@ -611,29 +614,29 @@ function renderDetail(coreId){
         🗑 刪除核心技能
       </button>
     </div>
-    <div class="detail-header" style="--card-color:${c.color};--card-color-faint:${c.color}09">
+    <div class="detail-header" style="--card-color:${col};--card-color-faint:${col}09">
       <div class="detail-header-bg"></div>
       <div class="detail-top">
         <div>
-          <div class="detail-icon">${c.icon}</div>
+          <div class="detail-icon">${esc(c.icon)}</div>
         </div>
         <div style="flex:1">
-          <div class="detail-name">${c.title}</div>
-          <div class="detail-title" style="color:${c.color};opacity:0.6">${c.name}</div>
-          <div class="detail-desc">${c.desc||""}</div>
+          <div class="detail-name">${esc(c.title)}</div>
+          <div class="detail-title" style="color:${col};opacity:0.6">${esc(c.name)}</div>
+          <div class="detail-desc">${esc(c.desc||"")}</div>
         </div>
         <div class="lv-ring-wrap">
           ${svgRing(xp,c.color,64)}
-          <div class="lv-ring-lbl" style="color:${c.color}">${lvName(lv)}</div>
+          <div class="lv-ring-lbl" style="color:${col}">${lvName(lv)}</div>
         </div>
       </div>
       <div class="xp-block">
         <div class="xp-block-top">
-          <span>總 EXP：<span style="color:${c.color};font-family:'Cinzel',serif">${xp}</span></span>
+          <span>總 EXP：<span style="color:${col};font-family:'Cinzel',serif">${xp}</span></span>
           <span>${lv<maxLv()?`距 Lv${lv+1} 還需 ${need-cur} EXP`:"Lv99 已達神域！"}</span>
         </div>
         <div class="xp-big-bar">
-          <div class="xp-big-fill" style="width:${pct}%;background:linear-gradient(90deg,${c.color}66,${c.color});box-shadow:0 0 10px ${c.color}"></div>
+          <div class="xp-big-fill" style="width:${pct}%;background:linear-gradient(90deg,${col}66,${col});box-shadow:0 0 10px ${col}"></div>
         </div>
         <div class="lv-dots">${dots}</div>
       </div>
@@ -643,7 +646,7 @@ function renderDetail(coreId){
       <div style="display:flex;gap:6px">
         ${subs.length>=2?`<button class="btn-add" style="color:#a855f7;background:#a855f718;border:1px solid #a855f755"
           onclick="openMergeSub('${coreId}')">⚗ 合併</button>`:""}
-        <button class="btn-add" style="color:${c.color};background:${c.color}18;border:1px solid ${c.color}55"
+        <button class="btn-add" style="color:${col};background:${col}18;border:1px solid ${col}55"
           onclick="openAddSub('${coreId}')">+ 新增</button>
       </div>
     </div>
@@ -680,11 +683,11 @@ function renderStats(){
     ${sorted.map((c,i)=>`
       <div style="margin-bottom:10px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-          <span style="font-size:11px">${c.icon} ${c.name}</span>
-          <span style="color:${c.color};font-family:'Cinzel',serif;font-size:12px">Lv${c.lv} · ${c.xp} EXP</span>
+          <span style="font-size:11px">${esc(c.icon)} ${esc(c.name)}</span>
+          <span style="color:${esc(c.color)};font-family:'Cinzel',serif;font-size:12px">Lv${c.lv} · ${c.xp} EXP</span>
         </div>
         <div class="rank-bar-wrap">
-          <div style="height:4px;width:${Math.round(c.xp/maxXP*100)}%;background:linear-gradient(90deg,${c.color}66,${c.color});border-radius:2px;box-shadow:0 0 6px ${c.color}"></div>
+          <div style="height:4px;width:${Math.round(c.xp/maxXP*100)}%;background:linear-gradient(90deg,${esc(c.color)}66,${esc(c.color)});border-radius:2px;box-shadow:0 0 6px ${esc(c.color)}"></div>
         </div>
       </div>`).join("")}
   </div>`;
@@ -700,7 +703,7 @@ function renderProfile(){
       <div style="margin-bottom:12px">
         <label class="form-label">角色名稱</label>
         <div style="display:flex;gap:8px">
-          <input class="form-input" style="margin-bottom:0;flex:1" id="name-input" value="${state.charName}" placeholder="輸入名稱"/>
+          <input class="form-input" style="margin-bottom:0;flex:1" id="name-input" value="${esc(state.charName)}" placeholder="輸入名稱"/>
           <button onclick="saveName()" style="background:#4a9eff22;border:1px solid #4a9eff66;color:#4a9eff;border-radius:8px;padding:10px 14px;cursor:pointer;font-size:12px">儲存</button>
         </div>
       </div>
@@ -861,8 +864,8 @@ function openMergeSub(coreId){
         ${subs.map(s=>`
           <label style="display:flex;align-items:center;gap:8px;padding:8px 10px;
             background:var(--bg);border:1px solid var(--border2);border-radius:8px;cursor:pointer">
-            <input type="checkbox" value="${s.id}" style="accent-color:#a855f7;width:16px;height:16px"/>
-            <span style="font-size:13px">${s.icon||"⭐"} ${s.name}</span>
+            <input type="checkbox" value="${esc(s.id)}" style="accent-color:#a855f7;width:16px;height:16px"/>
+            <span style="font-size:13px">${esc(s.icon||"⭐")} ${esc(s.name)}</span>
             <span style="margin-left:auto;font-size:10px;color:#a855f7;font-family:'Cinzel',serif">EXP ${s.xp||0}</span>
           </label>`).join("")}
       </div>
@@ -891,10 +894,10 @@ function openMergeSub(coreId){
         ${CORES.map(c=>`
           <button onclick="setMergeCore('${c.id}')" id="mcore-${c.id}"
             style="padding:6px 10px;border-radius:8px;cursor:pointer;font-size:11px;
-            background:${c.id===coreId?c.color+'22':'var(--bg)'};
-            border:1px solid ${c.id===coreId?c.color:'var(--border2)'};
-            color:${c.id===coreId?c.color:'var(--muted)'}">
-            ${c.icon} ${c.name}
+            background:${c.id===coreId?esc(c.color)+'22':'var(--bg)'};
+            border:1px solid ${c.id===coreId?esc(c.color):'var(--border2)'};
+            color:${c.id===coreId?esc(c.color):'var(--muted)'}">
+            ${esc(c.icon)} ${esc(c.name)}
           </button>`).join("")}
       </div>
 
@@ -1050,7 +1053,7 @@ function renderModal(){
     return `
     <div class="note-item" id="note-${n.id}">
       <div style="flex:1;min-width:0">
-        <div class="note-text ${isLong?"collapsed":""}" id="ntext-${n.id}">${n.text}<span class="note-date">${n.date}</span></div>
+        <div class="note-text ${isLong?"collapsed":""}" id="ntext-${n.id}">${esc(n.text)}<span class="note-date">${esc(n.date)}</span></div>
         ${isLong?`<span class="note-toggle" onclick="toggleNote('${n.id}')" id="ntoggle-${n.id}">▼ 展開</span>`:""}
       </div>
       <button class="note-del" onclick="delNote('${n.id}')">✕</button>
@@ -1063,7 +1066,7 @@ function renderModal(){
     <div class="modal-sheet" id="modal-sheet">
       <div class="modal-handle"></div>
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
-        <div class="modal-title" style="color:${c.color};margin:0">◆ ${modalData.mode==="add"?"新增子技能":"編輯子技能"} ◆</div>
+        <div class="modal-title" style="color:${esc(c.color)};margin:0">◆ ${modalData.mode==="add"?"新增子技能":"編輯子技能"} ◆</div>
         <button onclick="closeModal()" style="background:var(--bg);border:1px solid var(--border2);
           color:var(--muted);width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:16px;
           flex-shrink:0;display:flex;align-items:center;justify-content:center">✕</button>
@@ -1071,7 +1074,7 @@ function renderModal(){
 
       <label class="form-label">歸屬核心技能</label>
       <select class="form-select" id="m-core" onchange="modalUpdateCore(this.value)">
-        ${CORES.map(cc=>`<option value="${cc.id}" ${cc.id===d.coreId?"selected":""}>${cc.icon} ${cc.title||cc.name}</option>`).join("")}
+        ${CORES.map(cc=>`<option value="${esc(cc.id)}" ${cc.id===d.coreId?"selected":""}>${esc(cc.icon)} ${esc(cc.title||cc.name)}</option>`).join("")}
       </select>
 
       <label class="form-label">技能類型</label>
@@ -1081,16 +1084,16 @@ function renderModal(){
       </div>
 
       <label class="form-label">子技能名稱 *</label>
-      <input class="form-input" id="m-name" value="${d.name}" placeholder="例：公開演講"/>
+      <input class="form-input" id="m-name" value="${esc(d.name)}" placeholder="例：公開演講"/>
 
       <label class="form-label">描述</label>
-      <input class="form-input" id="m-desc" value="${d.desc||""}" placeholder="簡短說明"/>
+      <input class="form-input" id="m-desc" value="${esc(d.desc||"")}" placeholder="簡短說明"/>
 
       <label class="form-label">圖示 Emoji</label>
-      <input class="form-input" id="m-icon" value="${d.icon||"⭐"}" placeholder="⭐"/>
+      <input class="form-input" id="m-icon" value="${esc(d.icon||"⭐")}" placeholder="⭐"/>
 
       <label class="form-label">📚 來源（書籍 / 課程）</label>
-      <input class="form-input" id="m-source" value="${d.source||""}" placeholder="《原子習慣》/ Coursera..."/>
+      <input class="form-input" id="m-source" value="${esc(d.source||"")}" placeholder="《原子習慣》/ Coursera..."/>
 
       <label class="form-label">EXP 值</label>
       <div class="xp-input-row">
@@ -1113,7 +1116,7 @@ function renderModal(){
 
       <div class="modal-actions">
         <button class="btn-save" id="btn-save"
-          style="background:${c.color}22;border:1px solid ${c.color}77;color:${c.color}"
+          style="background:${esc(c.color)}22;border:1px solid ${esc(c.color)}77;color:${esc(c.color)}"
           onclick="saveSub()">
           ${modalData.mode==="add"?"✦ 習得技能":"儲存"}
         </button>
@@ -1146,7 +1149,7 @@ function addNote(){
   const isLong=txt.length>70||txt.includes("\n");
   const div=document.createElement("div");div.className="note-item";div.id=`note-${note.id}`;
   div.innerHTML=`<div style="flex:1;min-width:0">
-      <div class="note-text ${isLong?"collapsed":""}" id="ntext-${note.id}">${note.text}<span class="note-date">${note.date}</span></div>
+      <div class="note-text ${isLong?"collapsed":""}" id="ntext-${note.id}">${esc(note.text)}<span class="note-date">${esc(note.date)}</span></div>
       ${isLong?`<span class="note-toggle" onclick="toggleNote('${note.id}')" id="ntoggle-${note.id}">▼ 展開</span>`:""}
     </div>
     <button class="note-del" onclick="delNote('${note.id}')">✕</button>`;

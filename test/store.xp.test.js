@@ -172,6 +172,25 @@ test("承接技能的核心被刪掉時，XP 走未歸屬而不是消失", () =>
   assert.equal(logOf(store)[0].skillId, null);
 });
 
+test("單獨刪掉一個子技能時，指向它的 reward 不留懸空參照", () => {
+  const {store} = fresh();
+  addSkill(store, {id: "sk_a"});
+  const step = store.addStep({kind: m.STEP_KIND.SIDE, title: "練習",
+                              rewards: [{skillId: "sk_a", xp: 25}]});
+  const legacy = store.legacyState();
+  store.saveLegacyState({...legacy,
+                         subSkills: legacy.subSkills.filter(s => s.id !== "sk_a")});
+
+  assert.deepEqual(store.getState().steps[0].rewards, []);
+  // 懸空的 reward 會讓 hasAttribution() 說謊：步驟看起來有歸屬，實際指向不存在
+  // 的技能。清掉之後 §4.3 的前門才擋得住，再編輯時會要求重新指定。
+  assert.throws(() => store.updateStep(step.id, {title: "練習 2"}), /指定 XP 歸屬/);
+  store.completeStep(step.id);
+  assert.equal(store.getState().profile.unassignedXP,
+               m.KIND_DEFAULT_XP[m.STEP_KIND.SIDE]);
+  assert.equal(logOf(store).at(-1).skillId, null);
+});
+
 test("每日任務同一天只給一次 XP，也不進 DONE", () => {
   const {store} = fresh();
   addSkill(store, {id: "sk_a"});
