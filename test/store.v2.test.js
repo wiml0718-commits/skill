@@ -98,7 +98,8 @@ test("inboxPeak 記的是待處理數，處理完之後不會退回去", () => {
   assert.equal(store.getState().meta.inboxPeak, 3);
 
   const ids = store.inboxSteps().map(s => s.id);
-  store.completeStep(ids[0]);
+  // 收件匣完成時才指定歸屬（§4.3）
+  store.completeStep(ids[0], {coreId: "body"});
   store.noteStep(ids[1]);
   store.dropStep(ids[2]);
   assert.equal(store.inboxPending().length, 0, "畫面上已經清空");
@@ -125,15 +126,18 @@ test("legacy 投影往返之後任務內容不變", () => {
   assert.deepEqual(store.legacyState(), before);
 });
 
-test("legacy 存檔只動 quest，不碰 Goal / Step 層", () => {
+test("legacy 存檔只動角色與技能，不碰步驟", () => {
   const store = createStore(backend({[LEGACY_PWA_KEY]: PWA, [LEGACY_GOALS_KEY]: GOALS}));
   store.load();
+  const before = store.getState().steps;
   const state = store.legacyState();
-  state.quests[0].title = "改過的標題";
+  assert.equal(state.quests, undefined, "任務已經統一走 steps，不再投影成 quest");
+
+  state.charName = "改過的名字";
   store.saveLegacyState(state);
 
-  assert.equal(store.goalSteps("g1").map(s => s.title).join(), "買鞋");
-  assert.equal(store.legacyState().quests[0].title, "改過的標題");
+  assert.equal(store.getState().profile.charName, "改過的名字");
+  assert.deepEqual(store.getState().steps, before, "步驟一個字都不該被動到");
 });
 
 test("legacy 存檔不會把順延狀態抹平成待辦", () => {
@@ -147,15 +151,17 @@ test("legacy 存檔不會把順延狀態抹平成待辦", () => {
   assert.equal(step.deferCount, 1);
 });
 
-test("新建立的任務與技能拿到合法 id", () => {
+test("新建立的技能與步驟拿到合法 id", () => {
   const store = createStore(backend());
   store.load();
   const state = store.legacyState();
   state.subSkills.push({id: "sk_9001", coreId: "body", name: "游泳", type: "active", xp: 0});
-  state.quests.push({id: "q_9002", title: "報名泳訓", type: "side", done: false});
   store.saveLegacyState(state);
   assert.ok(store.getState().skills.some(s => s.id === "sk_9001"));
-  assert.ok(store.getState().steps.some(s => s.id === "q_9002"));
+
+  const step = store.addStep({kind: "side", title: "報名泳訓",
+                              rewards: [{skillId: "sk_9001", xp: 20}]});
+  assert.ok(store.getState().steps.some(s => s.id === step.id));
 });
 
 test("刪除核心是一筆交易：技能、承接技能、reward、goal 綁定一起清掉", () => {

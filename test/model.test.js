@@ -410,3 +410,33 @@ test("完全沒有步驟的進行中目標也算停滯（該補一步或收掉�
   const r = m.reviewItems([goal("g1")], [], TODAY);
   assert.deepEqual(r.stalledGoals.map(g => g.id), ["g1"]);
 });
+
+// ── 每日任務的連續天數（§5.1）───────────────────────────────────────────────
+test("calcStreak 從今天往回數，今天還沒完成不算中斷", () => {
+  const TODAY = "2026-09-08";
+  assert.equal(m.calcStreak([], TODAY), 0, "沒打過卡就是 0");
+  assert.equal(m.calcStreak(undefined, TODAY), 0);
+  assert.equal(m.calcStreak([TODAY], TODAY), 1);
+  assert.equal(m.calcStreak(["2026-09-06", "2026-09-07", TODAY], TODAY), 3);
+  // 今天還沒做：昨天起算的那條還在，不該先歸零
+  assert.equal(m.calcStreak(["2026-09-06", "2026-09-07"], TODAY), 2);
+  // 中間斷過就停在斷點，不把更早的加回來
+  assert.equal(m.calcStreak(["2026-09-01", "2026-09-02", "2026-09-07"], TODAY), 1);
+  // 只有更早的紀錄，且昨天沒做：streak 已經斷了
+  assert.equal(m.calcStreak(["2026-09-01"], TODAY), 0);
+  // 補登進來的日期一樣算數（§5.1）
+  assert.equal(m.calcStreak(["2026-09-05", "2026-09-06", "2026-09-07"], TODAY), 3);
+});
+
+test("calcStreak 跨月與跨年都連得起來", () => {
+  assert.equal(m.calcStreak(["2026-08-30", "2026-08-31", "2026-09-01"], "2026-09-01"), 3);
+  assert.equal(m.calcStreak(["2025-12-31", "2026-01-01"], "2026-01-01"), 2);
+});
+
+test("shiftDate 用 UTC 算術，跨月與跨年都正確", () => {
+  assert.equal(m.shiftDate("2026-09-08", -1), "2026-09-07");
+  assert.equal(m.shiftDate("2026-09-01", -1), "2026-08-31");
+  assert.equal(m.shiftDate("2026-01-01", -1), "2025-12-31");
+  assert.equal(m.shiftDate("2026-02-28", 1), "2026-03-01");
+  assert.equal(m.shiftDate("2026-09-08", 0), "2026-09-08");
+});

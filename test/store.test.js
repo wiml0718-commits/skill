@@ -17,7 +17,7 @@ function fakeBackend(seed = null){
 function seeded(){
   const store = createStore(fakeBackend());
   store.load();
-  const goal = store.addGoal({title: "跑完半馬", why: "體力"});
+  const goal = store.addGoal({title: "跑完半馬", why: "體力", coreId: "body"});
   const a = store.addStep({goalId: goal.id, title: "報名"});
   const b = store.addStep({goalId: goal.id, title: "買鞋"});
   return {store, goal, a, b};
@@ -34,7 +34,7 @@ test("新增之後即寫入 backend，重新載入拿得回來", () => {
   const backend = fakeBackend();
   const store = createStore(backend);
   store.load();
-  const goal = store.addGoal({title: "跑完半馬"});
+  const goal = store.addGoal({title: "跑完半馬", coreId: "body"});
   store.addStep({goalId: goal.id, title: "報名"});
 
   const reloaded = createStore(backend);
@@ -48,7 +48,7 @@ test("addStep 依序遞增 order，各目標獨立", () => {
   const {store, goal, a, b} = seeded();
   assert.equal(a.order, 0);
   assert.equal(b.order, 1);
-  const other = store.addGoal({title: "存錢"});
+  const other = store.addGoal({title: "存錢", coreId: "body"});
   assert.equal(store.addStep({goalId: other.id, title: "記帳"}).order, 0);
 });
 
@@ -140,7 +140,7 @@ test("save() 回傳的也是複本，不能透過它改到內部狀態", () => {
 
 test("mutation 方法回傳的紀錄也是複本", () => {
   const {store, goal, a} = seeded();
-  store.addGoal({title: "另一個"}).title = "被改掉";
+  store.addGoal({title: "另一個", coreId: "body"}).title = "被改掉";
   store.completeStep(a.id).state = STEP_STATE.TODO;
   assert.deepEqual(store.getState().goals.map(g => g.title), ["跑完半馬", "另一個"]);
   assert.equal(store.getState().steps.find(s => s.id === a.id).state, STEP_STATE.DONE);
@@ -161,9 +161,9 @@ test("收件匣項目歸入目標時排到最後，不搶走現有的下一步",
 
 test("todayList 每個進行中目標各一個下一步，封存的不列入", () => {
   const {store, goal, a} = seeded();
-  const other = store.addGoal({title: "存錢"});
+  const other = store.addGoal({title: "存錢", coreId: "body"});
   const c = store.addStep({goalId: other.id, title: "記帳"});
-  const archived = store.addGoal({title: "舊目標"});
+  const archived = store.addGoal({title: "舊目標", coreId: "body"});
   store.addStep({goalId: archived.id, title: "殘留"});
   store.setGoalStatus(archived.id, "archived");
 
@@ -250,7 +250,7 @@ test("replaceAll 用於匯入備份，會覆蓋並寫回 backend", () => {
   const backend = fakeBackend();
   const store = createStore(backend);
   store.load();
-  store.addGoal({title: "舊的"});
+  store.addGoal({title: "舊的", coreId: "body"});
 
   store.replaceAll({
     version: 1,
@@ -278,7 +278,7 @@ test("backend 寫入失敗時不讓呼叫端崩潰", () => {
     setItem: () => {throw new Error("QuotaExceeded");},
   });
   store.load();
-  assert.doesNotThrow(() => store.addGoal({title: "仍可操作"}));
+  assert.doesNotThrow(() => store.addGoal({title: "仍可操作", coreId: "body"}));
   assert.equal(store.getState().goals.length, 1);
 });
 
@@ -321,7 +321,7 @@ test("重新載入後順延次數仍在", () => {
   const backend = fakeBackend();
   const store = createStore(backend);
   store.load();
-  const g = store.addGoal({title: "半馬"});
+  const g = store.addGoal({title: "半馬", coreId: "body"});
   const s = store.addStep({goalId: g.id, title: "報名"});
   store.deferStep(s.id);
   store.deferStep(s.id);
