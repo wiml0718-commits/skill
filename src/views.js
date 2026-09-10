@@ -6,7 +6,8 @@ import {STEP_STATE, STEP_STATE_LABEL, STEP_KIND, GOAL_STATUS, hasDeferWarning,
         DEFER_WARN_THRESHOLD, LEVEL_XP, MAX_LV, calcLv, calcStreak, shiftDate,
         KIND_DEFAULT_XP, normalizeColor} from "./model.js";
 import {createReminders, todayISO} from "./reminders.js";
-import {lvName, levelProgress, BACKFILL_DAYS} from "./rpg.js";
+import {lvName, levelProgress, charTitle, coreLevels, BACKFILL_DAYS} from "./rpg.js";
+import {ACHIEVEMENTS, achievementById, globalStreak} from "./achievements.js";
 
 const store = createStore();
 const reminders = createReminders(store);
@@ -510,6 +511,17 @@ const api = {
   color: normalizeColor,
   levelProgress,
   todayISO,           // §5.0 的邏輯日：整個 app 唯一的「今天」
+
+  // ── 角色卡與成就（§6）──────────────────────────────────────────────────
+  // 常數表凍結：呼叫端只是拿來顯示，不該改到判定用的同一份資料。
+  ACHIEVEMENTS: Object.freeze(ACHIEVEMENTS.map(a => Object.freeze({...a}))),
+  achievementById,
+  unlockedAchievements(){return store.achievements();},
+  drainUnlocks(){return store.drainUnlocks();},
+  charTitle(){const s = store.getState(); return charTitle(s.cores, s.skills);},
+  coreLevels(){const s = store.getState(); return coreLevels(s.cores, s.skills);},
+  totalLevel(){return store.totalLevel();},
+  globalStreak(){return globalStreak(store.getState().meta, todayISO());},
 
   // 與既有的備份匯出 / 匯入串接
   exportPayload(){return store.toJSON();},

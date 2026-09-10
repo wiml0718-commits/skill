@@ -1,9 +1,9 @@
 // 版本一定要跟著改：不改的話 sw.js 位元組相同，既有安裝不會裝新的 worker，
 // cache-first 會繼續送舊的 index.html 與模組。
-const CACHE = "skill-tree-v10";
+const CACHE = "skill-tree-v11";
 const ASSETS = ["./index.html", "./manifest.json",
   "./src/model.js", "./src/store.js", "./src/views.js", "./src/reminders.js",
-  "./src/migrate.js", "./src/rpg.js"];
+  "./src/migrate.js", "./src/rpg.js", "./src/achievements.js"];
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));
   self.skipWaiting();
