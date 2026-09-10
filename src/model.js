@@ -196,6 +196,24 @@ export function createProfile({charName = "冒險者", createdAt = null,
   };
 }
 
+// 顏色會被直接插進 inline style。HTML 跳脫擋不住 CSS 的分隔字元（`;` `:` `(`），
+// 所以 `esc()` 之後仍然可以塞進整串宣告；匯入的備份是不受信任的輸入。收斂成
+// 十六進位色碼是在建立實體時就做完，而不是留給每個渲染點各自判斷。
+//
+// 輸出一律是六位數：畫面上到處都在色碼後面接透明度（`${color}15`、`${color}44`），
+// 只要放行三位或帶 alpha 的寫法，接完就是 `#fff15` 這種無效值，卡片背景與漸層
+// 會整片消失。三位數展開成六位，帶 alpha 的一律不收。
+export const DEFAULT_CORE_COLOR = "#4a9eff";
+const HEX_SHORT = /^#[0-9a-fA-F]{3}$/;
+const HEX_FULL = /^#[0-9a-fA-F]{6}$/;
+
+export function normalizeColor(v){
+  const s = text(v).trim();
+  if(HEX_FULL.test(s)) return s;
+  if(HEX_SHORT.test(s)) return "#" + [...s.slice(1)].map(c => c + c).join("");
+  return DEFAULT_CORE_COLOR;
+}
+
 export function createCore({id, name, title = "", icon = "", color = "",
                             order, builtin} = {}){
   const coreId = requireId(id, "core");
@@ -205,7 +223,7 @@ export function createCore({id, name, title = "", icon = "", color = "",
     name: requireTitle(name),
     title: text(title).trim(),
     icon: text(icon),
-    color: text(color),
+    color: normalizeColor(color),
     order,
     builtin: typeof builtin === "boolean" ? builtin : isBuiltinCoreId(coreId),
   };
