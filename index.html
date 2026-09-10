@@ -447,7 +447,7 @@ function updateNav(){
 
 // ── Views ─────────────────────────────────────────────────────────────────────
 let currentTab="skills";
-let statsSub="grow";   // grow | ach
+let statsSub="grow";   // grow | ach | review
 
 function switchStatsSub(v){statsSub=v;render();}
 function statsSubTabs(){
@@ -457,7 +457,7 @@ function statsSubTabs(){
     border:1px solid ${statsSub===v?"#4a9eff":"var(--border2)"};
     color:${statsSub===v?"#4a9eff":"var(--muted)"}">${label}</button>`;
   return `<div style="display:flex;gap:8px;margin-bottom:12px">
-    ${btn("grow","📊 成長")}${btn("ach","🏅 成就")}</div>`;
+    ${btn("grow","📊 成長")}${btn("ach","🏅 成就")}${btn("review","🔁 回顧")}</div>`;
 }
 let detailCore=null;
 
@@ -477,7 +477,8 @@ function render(){
       if(detailCore)el.innerHTML=renderDetail(detailCore);
       else el.innerHTML=renderCoreList();
     }else if(currentTab==="stats"){
-      el.innerHTML=statsSubTabs()+(statsSub==="ach"?renderAchievements():renderStats());
+      el.innerHTML=statsSubTabs()+(statsSub==="ach"?renderAchievements()
+        :statsSub==="review"?renderReview():renderStats());
     }else if(currentTab==="quests"){
       el.innerHTML=renderQuests();
     }else if(currentTab==="goals"){
@@ -833,6 +834,107 @@ function renderAchievements(){
       已解鎖 ${unlocked.length} / ${G.ACHIEVEMENTS.length}
     </div>`
     +section(`◆ 已解鎖`,unlocked)+section(`◆ 未解鎖`,locked);
+}
+
+// ── 每週回顧（§5.4）───────────────────────────────────────────────────────────
+function renderReview(){
+  const r=window.Goals.weeklyReview();
+  const row=(lbl,val,col)=>`<div class="stat-row"><span class="stat-lbl">${lbl}</span>
+    <span class="stat-val" style="color:${col}">${esc(val)}</span></div>`;
+
+  const gains=r.cores.length===0
+    ?`<div style="font-size:10px;color:var(--muted2);padding:4px 0">本週還沒有 XP 進帳</div>`
+    :r.cores.map(c=>`<div class="stat-row">
+        <span class="stat-lbl">${esc(c.core.icon)} ${esc(c.core.name)}</span>
+        <span class="stat-val" style="color:${cssColor(c.core.color)}">+${c.gain}</span>
+      </div>`).join("");
+
+  const ups=r.levelUps.length===0?"":`<div style="margin-top:8px;font-size:10px;color:#f59e0b">
+    ${r.levelUps.map(u=>`⬆ ${esc(u.core.name)} Lv${u.from} → Lv${u.to}`).join("　")}</div>`;
+
+  const result=`<div class="stat-block">
+    <div class="stat-block-title">◆ 本週成果</div>
+    <div style="font-size:9px;color:var(--muted2);margin-bottom:8px">
+      ${esc(r.from)} ～ ${esc(r.to)}（週一起算，日界凌晨 4:00）
+    </div>
+    ${row("獲得 EXP","+"+r.xp,"#22d3ee")}
+    ${row("完成步驟",r.steps+" 項","#f59e0b")}
+    ${row("最長連續",r.bestStreak+" 天","#ef4444")}
+    <div style="height:8px"></div>
+    ${gains}${ups}
+  </div>`;
+
+  const item=(text,note)=>`<div style="padding:7px 0;border-bottom:1px solid var(--border2)">
+    <div style="font-size:11px">${esc(text)}</div>
+    <div style="font-size:9px;color:var(--muted2);margin-top:2px">${esc(note)}</div>
+  </div>`;
+  const decide=[
+    ...r.review.stalling.map(s=>item(s.title,`已順延 ${s.deferCount} 次`)),
+    ...r.review.longOverdue.map(s=>item(s.title,`逾期：${s.due}`)),
+    ...r.review.stalledGoals.map(g=>item(g.title,"這個目標沒有下一步")),
+  ];
+  const pending=`<div class="stat-block">
+    <div class="stat-block-title">◆ 待重新決定（${decide.length}）</div>
+    ${decide.length===0
+      ?`<div style="font-size:10px;color:var(--muted2)">沒有需要重新決定的項目</div>`
+      :decide.join("")}
+  </div>`;
+
+  const un=r.unassigned;
+  const unassigned=`<div class="stat-block">
+    <div class="stat-block-title">◆ 待歸屬 EXP（${un.length}）</div>
+    ${un.length===0
+      ?`<div style="font-size:10px;color:var(--muted2)">沒有待歸屬的 EXP</div>`
+      :un.map(e=>`<div class="stat-row">
+          <span class="stat-lbl">${esc(e.date)}</span>
+          <span class="stat-val" style="color:#a855f7">${e.xp} EXP</span>
+        </div>`).join("")
+      +`<div style="font-size:9px;color:var(--muted2);margin-top:6px">
+          這些是遷移、刪除核心或匯入帶進來的，指定核心之後就會計入該核心。
+        </div>`}
+  </div>`;
+
+  return result+pending+unassigned;
+}
+
+// ── 每日結算（§5.3）──────────────────────────────────────────────────────────
+// 當天首次開啟才顯示前一天的摘要；看過就寫 meta，同一天不會再跳第二次。
+function showDailySummary(){
+  if(!window.Goals||!window.Goals.pendingDailySummary)return;
+  let s=null;
+  try{ s=window.Goals.pendingDailySummary(); }catch(err){ console.error(err); return; }
+  // 沒東西可報的日子也要記下來，不然每次開 App 都要重算一次昨天
+  if(!s){ try{ window.Goals.markDailySummarySeen(); }catch(err){ console.error(err); } return; }
+
+  const existing=document.getElementById("modal");if(existing)existing.remove();
+  const overlay=document.createElement("div");
+  overlay.id="modal";overlay.className="modal-overlay";
+  overlay.onclick=e=>{if(e.target===overlay)closeDailySummary();};
+  const line=(lbl,val,col)=>`<div class="stat-row"><span class="stat-lbl">${lbl}</span>
+    <span class="stat-val" style="color:${col}">${esc(val)}</span></div>`;
+  overlay.innerHTML=`
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <div class="modal-title" style="color:#4a9eff">◆ 昨日結算 ◆</div>
+      <div style="text-align:center;font-size:9px;color:var(--muted2);margin-bottom:12px">
+        ${esc(s.day)}
+      </div>
+      ${line("完成項目",s.steps+" 項","#f59e0b")}
+      ${line("獲得 EXP","+"+s.xp,"#22d3ee")}
+      ${s.streaks.map(t=>line(esc(t.title),t.streak+" 天連續","#ef4444")).join("")}
+      ${s.levelUps.map(u=>line(esc(u.core.name),`Lv${u.from} → Lv${u.to}`,
+        cssColor(u.core.color))).join("")}
+      <div class="modal-actions">
+        <button class="btn-save" style="background:#4a9eff22;border:1px solid #4a9eff77;color:#4a9eff"
+          onclick="closeDailySummary()">知道了</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+function closeDailySummary(){
+  try{ window.Goals.markDailySummarySeen(); }catch(err){ console.error(err); }
+  const m=document.getElementById("modal");if(m)m.remove();
 }
 
 // 解鎖是在 store 的寫入路徑上發生的，檢視端只負責把佇列取出來報一次。
@@ -2163,6 +2265,7 @@ function boot(){
   }
   checkOverdue();
   render();
+  showDailySummary();
 }
 window.boot=boot;
 

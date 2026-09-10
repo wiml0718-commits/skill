@@ -10,6 +10,7 @@ import {logicalToday, resolveGrants, compressXpLog, canBackfill,
         countsAsActivity, hasAttribution, requiresAttribution,
         BACKFILL_DAYS} from "./rpg.js";
 import {evaluateAchievements} from "./achievements.js";
+import {dailySummary, hasDailyContent, weeklySummary} from "./review.js";
 
 export const STORAGE_KEY = "skill-rpg-v2";
 export const SCHEMA_VERSION = 2;
@@ -491,6 +492,31 @@ export function createStore(backend = defaultBackend()){
     save(){
       commit();
       return store.getState();
+    },
+
+    // ── 節奏與回顧（§5.3–5.4）───────────────────────────────────────────────
+    // 今天還沒看過結算，而且昨天真的有東西可報時，回傳昨天的摘要；否則 null。
+    // 「看過了」只認 meta.lastDailySummaryDate，所以同一天重開 App 只會出現一次。
+    pendingDailySummary(){
+      const today = logicalToday();
+      if(data.meta.lastDailySummaryDate === today) return null;
+      const summary = dailySummary(store.getState(), model.shiftDate(today, -1));
+      return hasDailyContent(summary) ? summary : null;
+    },
+
+    // 沒有東西可報的那幾天也要記下來，不然每次開 App 都要重算一次昨天。
+    markDailySummarySeen(){
+      data.meta = {...data.meta, lastDailySummaryDate: logicalToday()};
+      commit();
+      return data.meta.lastDailySummaryDate;
+    },
+
+    weeklyReview(){return weeklySummary(store.getState(), logicalToday());},
+
+    markWeeklyReviewSeen(){
+      data.meta = {...data.meta, lastWeeklyReviewDate: logicalToday()};
+      commit();
+      return data.meta.lastWeeklyReviewDate;
     },
 
     // ── 成就（§6.2）─────────────────────────────────────────────────────────

@@ -8,6 +8,7 @@ import {STEP_STATE, STEP_STATE_LABEL, STEP_KIND, GOAL_STATUS, hasDeferWarning,
 import {createReminders, todayISO} from "./reminders.js";
 import {lvName, levelProgress, charTitle, coreLevels, BACKFILL_DAYS} from "./rpg.js";
 import {ACHIEVEMENTS, achievementById, globalStreak} from "./achievements.js";
+import {weekRange} from "./review.js";
 
 const store = createStore();
 const reminders = createReminders(store);
@@ -522,6 +523,13 @@ const api = {
   coreLevels(){const s = store.getState(); return coreLevels(s.cores, s.skills);},
   totalLevel(){return store.totalLevel();},
   globalStreak(){return globalStreak(store.getState().meta, todayISO());},
+
+  // ── 節奏與回顧（§5.3–5.4）────────────────────────────────────────────────
+  pendingDailySummary(){return store.pendingDailySummary();},
+  markDailySummarySeen(){return store.markDailySummarySeen();},
+  weeklyReview(){return store.weeklyReview();},
+  markWeeklyReviewSeen(){return store.markWeeklyReviewSeen();},
+  weekRange,
 
   // 與既有的備份匯出 / 匯入串接
   exportPayload(){return store.toJSON();},
