@@ -4,7 +4,7 @@
 import {createStore} from "./store.js";
 import {STEP_STATE, STEP_STATE_LABEL, STEP_KIND, GOAL_STATUS, hasDeferWarning,
         DEFER_WARN_THRESHOLD, LEVEL_XP, MAX_LV, calcLv, calcStreak, shiftDate,
-        KIND_DEFAULT_XP} from "./model.js";
+        KIND_DEFAULT_XP, normalizeColor} from "./model.js";
 import {createReminders, todayISO} from "./reminders.js";
 import {lvName, levelProgress, BACKFILL_DAYS} from "./rpg.js";
 
@@ -506,6 +506,8 @@ const api = {
   MAX_LV,
   calcLv,
   lvName,
+  // 核心顏色進的是 inline style，跳脫擋不住 CSS 的分隔字元（§index.html）
+  color: normalizeColor,
   levelProgress,
   todayISO,           // §5.0 的邏輯日：整個 app 唯一的「今天」
 
