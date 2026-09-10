@@ -447,6 +447,18 @@ function updateNav(){
 
 // ── Views ─────────────────────────────────────────────────────────────────────
 let currentTab="skills";
+let statsSub="grow";   // grow | ach | review
+
+function switchStatsSub(v){statsSub=v;render();}
+function statsSubTabs(){
+  const btn=(v,label)=>`<button onclick="switchStatsSub('${v}')"
+    style="flex:1;padding:8px;border-radius:8px;cursor:pointer;font-size:11px;
+    background:${statsSub===v?"#4a9eff22":"var(--bg)"};
+    border:1px solid ${statsSub===v?"#4a9eff":"var(--border2)"};
+    color:${statsSub===v?"#4a9eff":"var(--muted)"}">${label}</button>`;
+  return `<div style="display:flex;gap:8px;margin-bottom:12px">
+    ${btn("grow","📊 成長")}${btn("ach","🏅 成就")}${btn("review","🔁 回顧")}</div>`;
+}
 let detailCore=null;
 
 function switchTab(tab){
@@ -465,7 +477,8 @@ function render(){
       if(detailCore)el.innerHTML=renderDetail(detailCore);
       else el.innerHTML=renderCoreList();
     }else if(currentTab==="stats"){
-      el.innerHTML=renderStats();
+      el.innerHTML=statsSubTabs()+(statsSub==="ach"?renderAchievements()
+        :statsSub==="review"?renderReview():renderStats());
     }else if(currentTab==="quests"){
       el.innerHTML=renderQuests();
     }else if(currentTab==="goals"){
@@ -486,6 +499,7 @@ function render(){
   // 提醒與 badge 依當前資料重算。refresh 內部自行吞錯，不會影響渲染。
   // 任務已經統一成 steps，再把 quests 傳進去會讓同一件事被算兩次
   if(window.Reminders)window.Reminders.refresh();
+  flushUnlocks();
 }
 
 // ── Core List ─────────────────────────────────────────────────────────────────
@@ -692,7 +706,246 @@ function renderStats(){
       </div>`).join("")}
   </div>`;
 
-  return overview+ranking;
+  return charCard()+radarBlock()+overview+ranking;
+}
+
+// ── 角色卡（§6.1）─────────────────────────────────────────────────────────────
+function charCard(){
+  const G=window.Goals;
+  const totalXP=G.listSkills().reduce((a,s)=>a+(s.xp||0),0);
+  const cells=[
+    ["總等級", "★ "+G.totalLevel(), "#f59e0b"],
+    ["總 EXP", totalXP, "#22d3ee"],
+    ["連續天數", G.globalStreak()+" 天", "#ef4444"],
+    ["成就", G.unlockedAchievements().length+" / "+G.ACHIEVEMENTS.length, "#a855f7"],
+  ];
+  return `<div class="stat-block" style="text-align:center">
+    <div class="stat-block-title" style="text-align:left">◆ 角色卡</div>
+    <div style="font-family:'Cinzel',serif;font-size:17px;color:var(--text);margin:2px 0 3px">
+      ${esc(state.charName)}
+    </div>
+    <div style="font-size:11px;color:#f59e0b;letter-spacing:1px;margin-bottom:12px">
+      ${esc(G.charTitle())}
+    </div>
+    <div style="display:flex;gap:6px">
+      ${cells.map(([lbl,val,col])=>`
+        <div style="flex:1;background:var(--bg);border:1px solid var(--border2);
+          border-radius:10px;padding:8px 4px">
+          <div style="font-family:'Cinzel',serif;font-size:14px;color:${col}">${esc(val)}</div>
+          <div style="font-size:8px;color:var(--muted);margin-top:2px">${lbl}</div>
+        </div>`).join("")}
+    </div>
+  </div>`;
+}
+
+// ── 屬性雷達圖（§6.1）────────────────────────────────────────────────────────
+// N = 目前核心數，inline SVG，不引入圖表函式庫。N < 3 構不成多邊形，退回長條。
+function radarBlock(){
+  const levels=window.Goals.coreLevels();
+  const body=levels.length<3?levelBars(levels):radarSvg(levels);
+  return `<div class="stat-block">
+    <div class="stat-block-title">◆ 屬性</div>
+    ${body}
+  </div>`;
+}
+
+function levelBars(levels){
+  if(levels.length===0)return `<div class="empty-state">還沒有核心技能</div>`;
+  const max=Math.max(1,...levels.map(l=>l.lv));
+  return levels.map(l=>{
+    const col=cssColor(l.core.color);
+    return `<div style="margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px">
+        <span>${esc(l.core.icon)} ${esc(l.core.name)}</span>
+        <span style="color:${col};font-family:'Cinzel',serif">Lv${l.lv}</span>
+      </div>
+      <div class="rank-bar-wrap">
+        <div style="height:4px;width:${Math.round(l.lv/max*100)}%;background:${col};
+          border-radius:2px;box-shadow:0 0 6px ${col}"></div>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function radarSvg(levels){
+  const n=levels.length, size=260, c=size/2, R=size/2-40;
+  // 相對比例：全部同級時是正多邊形，差距極大時也不會超出畫布
+  const max=Math.max(1,...levels.map(l=>l.lv));
+  // Lv0 留一段最小半徑，不然那個頂點會塌到圓心，看不出核心存在
+  const MIN=0.12;
+  const ang=i=>-Math.PI/2+2*Math.PI*i/n;
+  const pt=(i,r)=>[c+r*Math.cos(ang(i)), c+r*Math.sin(ang(i))];
+  const poly=r=>levels.map((_,i)=>pt(i,r).map(v=>v.toFixed(1)).join(",")).join(" ");
+  const grid=[0.25,0.5,0.75,1].map(f=>
+    `<polygon points="${poly(R*f)}" fill="none" stroke="#1e3a4a" stroke-width="1"/>`).join("");
+  const spokes=levels.map((_,i)=>{
+    const [x,y]=pt(i,R);
+    return `<line x1="${c}" y1="${c}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}"
+      stroke="#1e3a4a" stroke-width="1"/>`;
+  }).join("");
+  const shape=levels.map((l,i)=>
+    pt(i,R*(MIN+(1-MIN)*(l.lv/max))).map(v=>v.toFixed(1)).join(",")).join(" ");
+  const dots=levels.map((l,i)=>{
+    const [x,y]=pt(i,R*(MIN+(1-MIN)*(l.lv/max)));
+    return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3"
+      fill="${cssColor(l.core.color)}"/>`;
+  }).join("");
+  const labels=levels.map((l,i)=>{
+    const [x,y]=pt(i,R+22);
+    const col=cssColor(l.core.color);
+    return `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" text-anchor="middle"
+      dominant-baseline="middle" font-size="13">${esc(l.core.icon)}</text>
+      <text x="${x.toFixed(1)}" y="${(y+12).toFixed(1)}" text-anchor="middle"
+      dominant-baseline="middle" font-size="8" fill="${col}"
+      font-family="'Share Tech Mono',monospace">${l.lv}</text>`;
+  }).join("");
+  return `<div style="display:flex;justify-content:center">
+    <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="max-width:100%">
+      ${grid}${spokes}
+      <polygon points="${shape}" fill="#4a9eff33" stroke="#4a9eff" stroke-width="2"/>
+      ${dots}${labels}
+    </svg>
+  </div>`;
+}
+
+// ── 成就頁（§6.2）─────────────────────────────────────────────────────────────
+function renderAchievements(){
+  const G=window.Goals;
+  const got=new Map(G.unlockedAchievements().map(a=>[a.id,a.unlockedAt]));
+  const card=(a,at)=>`<div class="stat-block" style="margin-bottom:8px;padding:10px 12px;
+    ${at?"":"opacity:.45"}">
+    <div style="display:flex;align-items:center;gap:10px">
+      <div style="font-size:20px;filter:${at?"none":"grayscale(1)"}">${esc(a.icon)}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12px;color:var(--text)">${esc(a.name)}</div>
+        <div style="font-size:9px;color:var(--muted);margin-top:2px">${esc(a.desc)}</div>
+      </div>
+      <div style="font-size:8px;color:var(--muted2);text-align:right;flex-shrink:0">
+        ${at?esc(at.slice(0,10)):"未解鎖"}
+      </div>
+    </div>
+  </div>`;
+  const unlocked=G.ACHIEVEMENTS.filter(a=>got.has(a.id));
+  const locked=G.ACHIEVEMENTS.filter(a=>!got.has(a.id));
+  const section=(title,list)=>list.length===0?"":
+    `<div class="stat-block-title" style="margin:4px 0 6px">${title}</div>`
+    +list.map(a=>card(a,got.get(a.id)||null)).join("");
+  return `<div style="font-size:10px;color:var(--muted);margin-bottom:10px">
+      已解鎖 ${unlocked.length} / ${G.ACHIEVEMENTS.length}
+    </div>`
+    +section(`◆ 已解鎖`,unlocked)+section(`◆ 未解鎖`,locked);
+}
+
+// ── 每週回顧（§5.4）───────────────────────────────────────────────────────────
+function renderReview(){
+  const r=window.Goals.weeklyReview();
+  const row=(lbl,val,col)=>`<div class="stat-row"><span class="stat-lbl">${lbl}</span>
+    <span class="stat-val" style="color:${col}">${esc(val)}</span></div>`;
+
+  const gains=r.cores.length===0
+    ?`<div style="font-size:10px;color:var(--muted2);padding:4px 0">本週還沒有 XP 進帳</div>`
+    :r.cores.map(c=>`<div class="stat-row">
+        <span class="stat-lbl">${esc(c.core.icon)} ${esc(c.core.name)}</span>
+        <span class="stat-val" style="color:${cssColor(c.core.color)}">+${c.gain}</span>
+      </div>`).join("");
+
+  const ups=r.levelUps.length===0?"":`<div style="margin-top:8px;font-size:10px;color:#f59e0b">
+    ${r.levelUps.map(u=>`⬆ ${esc(u.core.name)} Lv${u.from} → Lv${u.to}`).join("　")}</div>`;
+
+  const result=`<div class="stat-block">
+    <div class="stat-block-title">◆ 本週成果</div>
+    <div style="font-size:9px;color:var(--muted2);margin-bottom:8px">
+      ${esc(r.from)} ～ ${esc(r.to)}（週一起算，日界凌晨 4:00）
+    </div>
+    ${row("獲得 EXP","+"+r.xp,"#22d3ee")}
+    ${row("完成步驟",r.steps+" 項","#f59e0b")}
+    ${row("最長連續",r.bestStreak+" 天","#ef4444")}
+    <div style="height:8px"></div>
+    ${gains}${ups}
+  </div>`;
+
+  const item=(text,note)=>`<div style="padding:7px 0;border-bottom:1px solid var(--border2)">
+    <div style="font-size:11px">${esc(text)}</div>
+    <div style="font-size:9px;color:var(--muted2);margin-top:2px">${esc(note)}</div>
+  </div>`;
+  const decide=[
+    ...r.review.stalling.map(s=>item(s.title,`已順延 ${s.deferCount} 次`)),
+    ...r.review.longOverdue.map(s=>item(s.title,`逾期：${s.due}`)),
+    ...r.review.stalledGoals.map(g=>item(g.title,"這個目標沒有下一步")),
+  ];
+  const pending=`<div class="stat-block">
+    <div class="stat-block-title">◆ 待重新決定（${decide.length}）</div>
+    ${decide.length===0
+      ?`<div style="font-size:10px;color:var(--muted2)">沒有需要重新決定的項目</div>`
+      :decide.join("")}
+  </div>`;
+
+  const un=r.unassigned;
+  const unassigned=`<div class="stat-block">
+    <div class="stat-block-title">◆ 待歸屬 EXP（${un.length}）</div>
+    ${un.length===0
+      ?`<div style="font-size:10px;color:var(--muted2)">沒有待歸屬的 EXP</div>`
+      :un.map(e=>`<div class="stat-row">
+          <span class="stat-lbl">${esc(e.date)}</span>
+          <span class="stat-val" style="color:#a855f7">${e.xp} EXP</span>
+        </div>`).join("")
+      +`<div style="font-size:9px;color:var(--muted2);margin-top:6px">
+          這些是遷移、刪除核心或匯入帶進來的，指定核心之後就會計入該核心。
+        </div>`}
+  </div>`;
+
+  return result+pending+unassigned;
+}
+
+// ── 每日結算（§5.3）──────────────────────────────────────────────────────────
+// 當天首次開啟才顯示前一天的摘要；看過就寫 meta，同一天不會再跳第二次。
+function showDailySummary(){
+  if(!window.Goals||!window.Goals.pendingDailySummary)return;
+  let s=null;
+  try{ s=window.Goals.pendingDailySummary(); }catch(err){ console.error(err); return; }
+  // 沒東西可報的日子也要記下來，不然每次開 App 都要重算一次昨天
+  if(!s){ try{ window.Goals.markDailySummarySeen(); }catch(err){ console.error(err); } return; }
+
+  const existing=document.getElementById("modal");if(existing)existing.remove();
+  const overlay=document.createElement("div");
+  overlay.id="modal";overlay.className="modal-overlay";
+  overlay.onclick=e=>{if(e.target===overlay)closeDailySummary();};
+  const line=(lbl,val,col)=>`<div class="stat-row"><span class="stat-lbl">${lbl}</span>
+    <span class="stat-val" style="color:${col}">${esc(val)}</span></div>`;
+  overlay.innerHTML=`
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <div class="modal-title" style="color:#4a9eff">◆ 昨日結算 ◆</div>
+      <div style="text-align:center;font-size:9px;color:var(--muted2);margin-bottom:12px">
+        ${esc(s.day)}
+      </div>
+      ${line("完成項目",s.steps+" 項","#f59e0b")}
+      ${line("獲得 EXP","+"+s.xp,"#22d3ee")}
+      ${s.streaks.map(t=>line(esc(t.title),t.streak+" 天連續","#ef4444")).join("")}
+      ${s.levelUps.map(u=>line(esc(u.core.name),`Lv${u.from} → Lv${u.to}`,
+        cssColor(u.core.color))).join("")}
+      <div class="modal-actions">
+        <button class="btn-save" style="background:#4a9eff22;border:1px solid #4a9eff77;color:#4a9eff"
+          onclick="closeDailySummary()">知道了</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+function closeDailySummary(){
+  try{ window.Goals.markDailySummarySeen(); }catch(err){ console.error(err); }
+  const m=document.getElementById("modal");if(m)m.remove();
+}
+
+// 解鎖是在 store 的寫入路徑上發生的，檢視端只負責把佇列取出來報一次。
+function flushUnlocks(){
+  if(!window.Goals||!window.Goals.drainUnlocks)return;
+  const ids=window.Goals.drainUnlocks();
+  ids.forEach((id,i)=>{
+    const a=window.Goals.achievementById(id);
+    if(!a)return;
+    setTimeout(()=>showToast(`${a.icon} 成就解鎖：${a.name}`,3000),i*400);
+  });
 }
 
 // ── Profile ───────────────────────────────────────────────────────────────────
@@ -2012,6 +2265,7 @@ function boot(){
   }
   checkOverdue();
   render();
+  showDailySummary();
 }
 window.boot=boot;
 

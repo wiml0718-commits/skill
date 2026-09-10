@@ -9,6 +9,8 @@ import {migrateV1, emptyReport, reportTotal, hasMergeNote, normalizeLegacyNotes,
 import {logicalToday, resolveGrants, compressXpLog, canBackfill,
         countsAsActivity, hasAttribution, requiresAttribution,
         BACKFILL_DAYS} from "./rpg.js";
+import {evaluateAchievements} from "./achievements.js";
+import {dailySummary, hasDailyContent, weeklySummary} from "./review.js";
 
 export const STORAGE_KEY = "skill-rpg-v2";
 export const SCHEMA_VERSION = 2;
@@ -247,6 +249,8 @@ export function createStore(backend = defaultBackend()){
   let fresh = false;
   // 覆寫會毀掉還救得回來的資料時，這次開啟就完全不寫（可用，但唯讀）。
   let holdWrites = false;
+  // 這次 session 新解鎖、還沒被 UI 取走的成就 id
+  const freshUnlocks = [];
   // 儲存讀不到時進入唯讀模式：資料只留在記憶體，一律不寫回去。
   let degraded = false;
 
@@ -264,9 +268,24 @@ export function createStore(backend = defaultBackend()){
     ensureGeneralSkills(data);
     const today = logicalToday();
     updatePeaks(data, today);
+    unlockAchievements(today);
     // 上限在 store 層強制執行，不能只靠 UI（§3.6）
     data.xpLog = compressXpLog(data.xpLog, today);
     persist();
+  }
+
+  // 成就只加不減（§6.2）：判定是純函式，這裡只負責把新達成的那幾筆補上時間。
+  // 資料之後怎麼變都不會把已解鎖的收回去——收回等於否認使用者做過的事。
+  function unlockAchievements(today){
+    const has = new Set(data.achievements.map(a => a.id));
+    const at = new Date().toISOString();
+    for(const id of evaluateAchievements(data, today)){
+      if(has.has(id)) continue;
+      data.achievements = [...data.achievements, model.createAchievement({id, unlockedAt: at})];
+      // UI 用這條佇列跳 toast。放在 store 是因為解鎖可能發生在任何一條寫入
+      // 路徑上，檢視端沒辦法自己知道剛剛多了什麼。
+      freshUnlocks.push(id);
+    }
   }
 
   // 讀不到儲存時的共同出口：記憶體裡給一份可用的空白狀態，但一個字都不寫。
@@ -473,6 +492,42 @@ export function createStore(backend = defaultBackend()){
     save(){
       commit();
       return store.getState();
+    },
+
+    // ── 節奏與回顧（§5.3–5.4）───────────────────────────────────────────────
+    // 今天還沒看過結算，而且昨天真的有東西可報時，回傳昨天的摘要；否則 null。
+    // 「看過了」只認 meta.lastDailySummaryDate，所以同一天重開 App 只會出現一次。
+    pendingDailySummary(){
+      const today = logicalToday();
+      if(data.meta.lastDailySummaryDate === today) return null;
+      const summary = dailySummary(store.getState(), model.shiftDate(today, -1));
+      return hasDailyContent(summary) ? summary : null;
+    },
+
+    // 沒有東西可報的那幾天也要記下來，不然每次開 App 都要重算一次昨天。
+    markDailySummarySeen(){
+      data.meta = {...data.meta, lastDailySummaryDate: logicalToday()};
+      commit();
+      return data.meta.lastDailySummaryDate;
+    },
+
+    weeklyReview(){return weeklySummary(store.getState(), logicalToday());},
+
+    markWeeklyReviewSeen(){
+      data.meta = {...data.meta, lastWeeklyReviewDate: logicalToday()};
+      commit();
+      return data.meta.lastWeeklyReviewDate;
+    },
+
+    // ── 成就（§6.2）─────────────────────────────────────────────────────────
+    achievements(){return copyAll(data.achievements);},
+
+    // 取走這次新解鎖的成就 id 並清空。取過就不會再取到第二次，避免同一則
+    // toast 在每次重繪時重播。
+    drainUnlocks(){
+      const out = freshUnlocks.slice();
+      freshUnlocks.length = 0;
+      return out;
     },
 
     // ── Goal ────────────────────────────────────────────────────────────────
