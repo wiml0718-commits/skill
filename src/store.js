@@ -135,6 +135,12 @@ function read(backend, key){
 const V2_ARRAYS = ["cores", "skills", "goals", "steps", "xpLog", "achievements"];
 const V2_OBJECTS = ["profile", "meta"];
 
+// `typeof [] === "object"`：只看 typeof 的話，一個 `config: []` 會被當成正常的
+// 設定區段，匯入時安靜地把 anchor 與目標綁定換成預設值。
+function isPlainObject(v){
+  return !!v && typeof v === "object" && !Array.isArray(v);
+}
+
 function sanitize(raw){
   const data = emptyData();
   const report = emptyReport();
@@ -224,10 +230,11 @@ function sanitize(raw){
   // 根 version 決定缺 planner 算不算損失：v2 沒有 planner 是正常的，v3 沒有
   // 代表這份資料被截斷了。
   const storedVersion = Number.isSafeInteger(raw.version) ? raw.version : 2;
-  const isV3 = storedVersion >= SCHEMA_VERSION;
-  if(isV3 && (!raw.planner || typeof raw.planner !== "object")){
-    report.missingSections += 1;
-  }
+  // 根 version 缺漏或壞掉時不能就當成 v2：那會把 planner 的完整性檢查整組關掉，
+  // 一份沒有 version 但帶著 planner 的備份就能靜默清掉班表與成果。帶著 planner
+  // 這件事本身就說明它是 v3 形狀的資料。
+  const isV3 = storedVersion >= SCHEMA_VERSION || raw.planner !== undefined;
+  if(isV3 && !isPlainObject(raw.planner)) report.missingSections += 1;
   data.planner = sanitizePlanner(raw.planner, report, {strict: isV3});
 
   return {data, report};
@@ -244,7 +251,7 @@ function sanitizePlanner(raw, report, {strict = false} = {}){
   // config 壞掉只退回未設定：為了一個壞掉的 anchor 丟掉整份成果不成比例。
   // 但那是一整段設定不見了，v3 的資料要計入損失，不能靜默歸零。缺席與壞掉
   // 一樣要算：`src.config || {}` 會讓缺席的那份安靜地變成一份有效的空設定。
-  let configLost = strict && (!src.config || typeof src.config !== "object");
+  let configLost = strict && !isPlainObject(src.config);
   try{ planner.config = model.createPlannerConfig(src.config || {}); }
   catch{
     planner.config = model.createPlannerConfig({});
@@ -255,12 +262,12 @@ function sanitizePlanner(raw, report, {strict = false} = {}){
   // v3 的 planner 少了一整段（被截斷的備份）跟 steps 整段不見是同一件事：
   // 補一個空容器就回報成功，會讓匯入靜默清掉整份班表與成果。
   if(strict){
-    if(!src.days || typeof src.days !== "object") report.missingSections += 1;
-    if(!src.stepDetails || typeof src.stepDetails !== "object") report.missingSections += 1;
+    if(!isPlainObject(src.days)) report.missingSections += 1;
+    if(!isPlainObject(src.stepDetails)) report.missingSections += 1;
     if(!Array.isArray(src.entries)) report.missingSections += 1;
   }
 
-  const days = src.days && typeof src.days === "object" ? src.days : {};
+  const days = isPlainObject(src.days) ? src.days : {};
   for(const [date, value] of Object.entries(days)){
     try{
       const key = model.normalizeDue(date);
@@ -269,7 +276,7 @@ function sanitizePlanner(raw, report, {strict = false} = {}){
     }catch{ report.skippedPlannerDays += 1; }
   }
 
-  const details = src.stepDetails && typeof src.stepDetails === "object" ? src.stepDetails : {};
+  const details = isPlainObject(src.stepDetails) ? src.stepDetails : {};
   for(const [id, value] of Object.entries(details)){
     try{ planner.stepDetails[id] = model.createStepDetail(value || {}); }
     catch{ report.skippedStepDetails += 1; }
@@ -1197,7 +1204,7 @@ export function createStore(backend = defaultBackend()){
     // 接受今天的主線。未來不能接受：接受是「今天要做這個」的宣告（§3.1）。
     // 本次時間跟 focus 一起落地：分兩次寫的話，第二次失敗會留下一個已接受但
     // plannedMinutes 還是 null 的今天，之後改精力或班表就會默默改掉顯示的時間。
-    setDayFocus(date, {goalId, stepId, plannedMinutes} = {}){
+    setDayFocus(date, {goalId, stepId, plannedMinutes, changeReason} = {}){
       let key, day;
       try{
         key = model.normalizeDue(date);
@@ -1218,6 +1225,7 @@ export function createStore(backend = defaultBackend()){
           // 重新開始就不再是收工：模式跟著回到 active，並恢復原本的主線（§4）。
           mode: model.DAY_MODE.ACTIVE,
           plannedMinutes: plannedMinutes === undefined ? prev.plannedMinutes : plannedMinutes,
+          changeReason: changeReason === undefined ? prev.changeReason : changeReason,
           focus: {goalId, stepId, acceptedAt: new Date().toISOString()},
           updatedAt: new Date().toISOString(),
         });

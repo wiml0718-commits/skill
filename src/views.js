@@ -545,6 +545,9 @@ const api = {
 // 寫入失敗是新的錯誤型別，既有的呼叫點都沒有處理過它。集中在這裡攔下來：
 // 明講沒有保存，然後依已經回復的狀態重畫——讓畫面留著一個沒存進去的結果，
 // 比直接說失敗更糟。業務規則的錯誤（例如缺 XP 歸屬）照舊往上丟給原本的處理。
+// 說明沒有保存、依已回復的狀態重畫，然後**把錯誤繼續往上丟**。只回一個
+// undefined 的話，index.html 那些 inline handler 會若無其事地往下走，接著跳
+// 「✓ 已完成 / 已儲存 / +XP」——畫面報的成功比什麼都不說更糟。
 function guardWrites(target, names){
   for(const name of names){
     const fn = target[name];
@@ -554,7 +557,7 @@ function guardWrites(target, names){
         if(!(err instanceof WriteError)) throw err;
         alert(err.message);
         repaint();
-        return undefined;
+        throw err;
       }
     };
   }

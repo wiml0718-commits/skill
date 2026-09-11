@@ -566,3 +566,48 @@ test("接受主線寫入失敗時，focus 與本次時間都不會留下", () =>
   assert.equal(res.ok, false);
   assert.equal(store.getState().planner.days[today], undefined);
 });
+
+// ── Codex Review 第 4 輪的回歸測試 ─────────────────────────────────────────
+test("planner 的物件區段是陣列時算損壞，不能因為 typeof 是 object 就放行", () => {
+  const store = createStore(backend());
+  store.load();
+  const base = {version: SCHEMA_VERSION, profile: {}, cores: [], skills: [], goals: [],
+                steps: [], xpLog: [], achievements: [], meta: {},
+                planner: {version: 1, config: {anchorDate: null, anchorPhase: null,
+                                               goalBindings: {}},
+                          days: {}, stepDetails: {}, entries: []}};
+  assert.equal(store.inspect(base).total, 0);
+  assert.equal(store.inspect({...base, planner: {...base.planner, config: []}}).total, 1);
+  assert.equal(store.inspect({...base, planner: {...base.planner, days: []}}).total, 1);
+  assert.equal(store.inspect({...base, planner: {...base.planner, stepDetails: []}}).total, 1);
+  assert.equal(store.inspect({...base, planner: [] }).total > 0, true, "planner 本身是陣列也不行");
+});
+
+test("根 version 缺漏時不把 planner 的完整性檢查關掉", () => {
+  const store = createStore(backend());
+  store.load();
+  const noVersion = {profile: {}, cores: [], skills: [], goals: [], steps: [],
+                     xpLog: [], achievements: [], meta: {}, planner: {version: 1}};
+  // config / days / stepDetails / entries 四段不見，不能因為 version 缺漏就當成 v2
+  assert.equal(store.inspect(noVersion).total, 4);
+
+  // 真正的 v2 備份沒有 planner，仍然不計入
+  const v2 = {version: 2, profile: {}, cores: [], skills: [], goals: [], steps: [],
+              xpLog: [], achievements: [], meta: {}};
+  assert.equal(store.inspect(v2).total, 0);
+});
+
+test("換主線的原因與 focus 在同一次寫入落地", () => {
+  const {store, goal, step} = seeded();
+  const today = TODAY();
+  const res = store.setDayFocus(today, {goalId: goal.id, stepId: step.id,
+                                        changeReason: "今天先推影片"});
+  assert.equal(res.ok, true);
+  const day = store.getState().planner.days[today];
+  assert.equal(day.changeReason, "今天先推影片");
+  assert.equal(day.focus.stepId, step.id);
+
+  // 沒帶就沿用原值，不會被清掉
+  store.setDayFocus(today, {goalId: goal.id, stepId: step.id});
+  assert.equal(store.getState().planner.days[today].changeReason, "今天先推影片");
+});

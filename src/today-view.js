@@ -727,10 +727,11 @@ export function createTodayView(store){
           say("error", "這個目標沒有可行動的主線下一步。");
           return repaint();
         }
-        const reason = value("today-reason");
-        const res = store.setDayFocus(today, {goalId, stepId: next.id});
-        if(res.ok && reason.trim()) store.setDayPlan(today, {changeReason: reason});
-        openSwitch = false;
+        // 原因跟 focus 同一次寫入：分兩次的話，第二次失敗會留下一個已經換過
+        // 但原因不見了的今天，畫面卻已經說「已換主線」。
+        const res = store.setDayFocus(today, {goalId, stepId: next.id,
+                                              changeReason: value("today-reason")});
+        if(res.ok) openSwitch = false;
         return apply(res, "已換主線。舊的進度還留著。");
       }
       if(tact === "daily"){

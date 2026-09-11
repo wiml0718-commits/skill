@@ -1529,11 +1529,13 @@ function saveSub(){
     d.xp=0;
     state.subSkills.push({...d,id});
   }
-  writeState();
+  // 沒寫進去就不要往下走：後面接的是「✓ 已儲存」與升級提示。
+  if(!writeState()){loadState();closeModal();render();return;}
   try{
     window.Goals.setSkillXp(id,targetXp);
   }catch{
     showToast("XP 沒有存進去，請重新整理再試",2500);
+    loadState();closeModal();render();return;
   }
   loadState();
   const newLv=calcLv(getCoreXP(d.coreId));
@@ -1950,7 +1952,10 @@ function completeQuest(id){
   const before=new Map(window.Goals.listSkills().map(x=>[x.id,x.xp||0]));
   try{
     window.Goals.completeStep(id);
-  }catch{
+  }catch(err){
+    // 寫入失敗跟「還沒指定歸屬」是兩回事：儲存空間滿了卻反過來問要算到哪個
+    // 核心，只會讓人再失敗一次。
+    if(err&&err.name==="WriteError")return;
     // 收件匣是唯一沒有事先歸屬的 kind，完成時才問（§4.3）。沒選就不完成。
     if(s.kind!=="inbox"){showToast("完成失敗，請重新整理再試");return;}
     const coreId=window.Goals.pickCore("這次完成的 XP 要算到哪個核心？");
