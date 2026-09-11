@@ -31,7 +31,7 @@ function legacyPwa(over = {}){
 test("完整遷移：核心、技能、任務、角色名全部到位且數字不變", () => {
   const {data, report} = migrateV1({pwa: legacyPwa()});
   assert.equal(data.profile.charName, "阿維");
-  assert.equal(data.profile.schemaVersion, 2);
+  assert.equal(data.profile.schemaVersion, 3);
   assert.equal(data.cores.length, 9, "沒存過 cores 的資料用內建預設");
   assert.deepEqual(data.skills.map(s => [s.id, s.xp]), [["sk_1", 80], ["sk_2", 50]]);
   assert.deepEqual(data.steps.map(s => [s.id, s.kind]), [["q_100", "main"], ["q_101", "daily"]]);

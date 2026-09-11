@@ -266,7 +266,7 @@ test("replaceAll 用於匯入備份，會覆蓋並寫回 backend", () => {
 test("toJSON 給出可直接寫進備份檔的資料", () => {
   const {store} = seeded();
   const dump = store.toJSON();
-  assert.equal(dump.version, 2);
+  assert.equal(dump.version, 3);
   assert.equal(dump.goals.length, 1);
   assert.equal(dump.steps.length, 2);
   assert.deepEqual(JSON.parse(JSON.stringify(dump)), dump, "必須可 JSON 序列化");

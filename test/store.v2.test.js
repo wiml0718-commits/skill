@@ -33,7 +33,7 @@ test("首次載入會遷移舊資料，並且一筆都不動舊 key", () => {
   store.load();
 
   assert.equal(store.migrationReport().migrated, true);
-  assert.equal(be.raw(STORAGE_KEY).version, 2);
+  assert.equal(be.raw(STORAGE_KEY).version, 3);
   // 舊 key 是最後的回退路徑，遷移不得刪也不得改
   assert.deepEqual(be.raw(LEGACY_PWA_KEY), PWA);
   assert.deepEqual(be.raw(LEGACY_GOALS_KEY), GOALS);
