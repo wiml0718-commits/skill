@@ -184,13 +184,16 @@ function normalizeRewards(list){
   return out;
 }
 
+// 根 version 與 profile.schemaVersion 同步。v3 = v2 加上今日計畫（planner）。
+export const DATA_VERSION = 3;
+
 // ── 建立：profile / core / skill / goal ───────────────────────────────────────
 export function createProfile({charName = "冒險者", createdAt = null,
                                unassignedXP = 0} = {}){
   const name = typeof charName === "string" ? charName.trim() : "";
   return {
     charName: name || "冒險者",
-    schemaVersion: 2,
+    schemaVersion: DATA_VERSION,
     createdAt: normalizeInstant(createdAt, "profile.createdAt"),
     unassignedXP: count(unassignedXP),
   };
@@ -556,4 +559,187 @@ export function coreXp(skills, coreId){
 // 總等級 = 目前所有核心的等級相加，含自訂核心，不假設剛好 9 個（§4.1）。
 export function totalLevel(cores, skills){
   return cores.reduce((a, c) => a + calcLv(coreXp(skills, c.id)), 0);
+}
+
+// ── 今日計畫（planner，schema v3）───────────────────────────────────────────
+// 班表、每日安排、主線接續與成果紀錄的資料實體。與 v2 的實體一樣：純建構 +
+// 驗證，不讀寫 storage、不決定「今天是哪一天」。推導規則住在 today-plan.js。
+export const PLANNER_VERSION = 1;
+
+// 一天的出勤只有這三種。work 與 overtime 都算一個出勤日，rest 中斷連續。
+export const ATTENDANCE = {WORK: "work", OVERTIME: "overtime", REST: "rest"};
+const ALL_ATTENDANCE = Object.values(ATTENDANCE);
+
+// 精力是使用者自選的主觀值，不是量測結果。未填一律留 null，不以 mid 頂替。
+export const ENERGY = {LOW: "low", MID: "mid", HIGH: "high"};
+const ALL_ENERGY = Object.values(ENERGY);
+
+// recovery = 這天收工。只影響建議與畫面，不完成步驟、不發 XP。
+export const DAY_MODE = {ACTIVE: "active", RECOVERY: "recovery"};
+const ALL_DAY_MODE = Object.values(DAY_MODE);
+
+export const OUTCOME = {PROGRESS: "progress", COMPLETE: "complete"};
+const ALL_OUTCOME = Object.values(OUTCOME);
+
+export const PHASE_COUNT = 4;
+export const MAX_MINUTES = 120;
+export const MINUTE_CHOICES = [0, 5, 15, 25, 60, 120];
+export const GOAL_BINDING_KEYS = ["ai", "video"];
+
+export const PLANNER_LIMITS = {
+  changeReason: 300,
+  stepDetail: 1000,
+  note: 4000,
+  nextAction: 1000,
+  url: 2048,
+};
+
+function optionalEnum(v, all, field){
+  if(v === undefined || v === null || v === "") return null;
+  if(!all.includes(v)) throw new Error(`${field} 不合法：${v}`);
+  return v;
+}
+
+function optionalText(v, max, field){
+  if(v === undefined || v === null) return "";
+  if(typeof v !== "string") throw new Error(`${field} 必須是文字`);
+  const t = v.trim();
+  if(t.length > max) throw new Error(`${field} 最多 ${max} 字元`);
+  return t;
+}
+
+function optionalMinutes(v, field){
+  if(v === undefined || v === null || v === "") return null;
+  if(!Number.isSafeInteger(v) || v < 0 || v > MAX_MINUTES){
+    throw new Error(`${field} 必須是 0–${MAX_MINUTES} 的整數`);
+  }
+  return v;
+}
+
+function optionalRefId(v, field){
+  if(v === undefined || v === null || v === "") return null;
+  if(typeof v !== "string" || !ID_PATTERN.test(v)) throw new Error(`${field} 不合法：${v}`);
+  return v;
+}
+
+// 成果連結只收絕對的 http / https。相對路徑與 javascript: 在畫面上看起來都像
+// 一個連結，點下去卻是另一回事，所以擋在資料邊界而不是渲染時才判斷。
+export function normalizeOutcomeUrl(v){
+  if(v === undefined || v === null || v === "") return null;
+  if(typeof v !== "string") throw new Error("成果連結必須是文字");
+  const s = v.trim();
+  if(!s) return null;
+  if(s.length > PLANNER_LIMITS.url){
+    throw new Error(`成果連結最多 ${PLANNER_LIMITS.url} 字元`);
+  }
+  let parsed;
+  try{ parsed = new URL(s); }
+  catch{ throw new Error("成果連結必須是完整的 http 或 https 網址"); }
+  if(parsed.protocol !== "http:" && parsed.protocol !== "https:"){
+    throw new Error("成果連結只接受 http 或 https");
+  }
+  return s;
+}
+
+// anchorDate 與 anchorPhase 少了任一個都算不出 phase。只留半組會讓畫面誤判
+// 「已設定班表」，所以一併收斂成未設定。
+export function createPlannerConfig({anchorDate = null, anchorPhase = null,
+                                     goalBindings = null} = {}){
+  const date = anchorDate ? normalizeDue(anchorDate) : null;
+  let phase = null;
+  if(anchorPhase !== null && anchorPhase !== undefined && anchorPhase !== ""){
+    if(!Number.isSafeInteger(anchorPhase) || anchorPhase < 0 || anchorPhase >= PHASE_COUNT){
+      throw new Error(`anchorPhase 必須是 0–${PHASE_COUNT - 1} 的整數`);
+    }
+    phase = anchorPhase;
+  }
+  const paired = date !== null && phase !== null;
+  const bindings = {};
+  const raw = goalBindings && typeof goalBindings === "object" ? goalBindings : {};
+  for(const key of GOAL_BINDING_KEYS){
+    bindings[key] = optionalRefId(raw[key], `goalBindings.${key}`);
+  }
+  return {
+    anchorDate: paired ? date : null,
+    anchorPhase: paired ? phase : null,
+    goalBindings: bindings,
+  };
+}
+
+export function createPlannerFocus({goalId, stepId, acceptedAt = null} = {}){
+  const g = optionalRefId(goalId, "focus.goalId");
+  const s = optionalRefId(stepId, "focus.stepId");
+  if(!g || !s) throw new Error("focus 必須同時有 goalId 與 stepId");
+  return {goalId: g, stepId: s, acceptedAt: normalizeInstant(acceptedAt, "focus.acceptedAt")};
+}
+
+export function createPlannerDay({attendancePlan = null, attendanceActual = null,
+                                  energy = null, availableMinutes = null,
+                                  plannedMinutes = null, mode = DAY_MODE.ACTIVE,
+                                  focus = null, changeReason = "",
+                                  updatedAt = null} = {}){
+  const available = optionalMinutes(availableMinutes, "availableMinutes");
+  let planned = optionalMinutes(plannedMinutes, "plannedMinutes");
+  // 可用時間被調低時把已選時間縮到上限（§4）。0 與 null 是兩件事：0 代表使用者
+  // 選了「今天不做」，null 代表還沒選，所以只夾上限，不把 0 當成未填。
+  if(planned !== null && available !== null && planned > available) planned = available;
+  return {
+    attendancePlan: optionalEnum(attendancePlan, ALL_ATTENDANCE, "attendancePlan"),
+    attendanceActual: optionalEnum(attendanceActual, ALL_ATTENDANCE, "attendanceActual"),
+    energy: optionalEnum(energy, ALL_ENERGY, "energy"),
+    availableMinutes: available,
+    plannedMinutes: planned,
+    mode: optionalEnum(mode, ALL_DAY_MODE, "mode") || DAY_MODE.ACTIVE,
+    focus: focus ? createPlannerFocus(focus) : null,
+    changeReason: optionalText(changeReason, PLANNER_LIMITS.changeReason, "changeReason"),
+    updatedAt: normalizeInstant(updatedAt, "day.updatedAt"),
+  };
+}
+
+// 使用者替某個 step 補的說明。不是另建一個 step，所以沒有 id、state 或 XP。
+export function createStepDetail({firstAction = "", minimumAction = "",
+                                  completionCriteria = ""} = {}){
+  const max = PLANNER_LIMITS.stepDetail;
+  return {
+    firstAction: optionalText(firstAction, max, "firstAction"),
+    minimumAction: optionalText(minimumAction, max, "minimumAction"),
+    completionCriteria: optionalText(completionCriteria, max, "completionCriteria"),
+  };
+}
+
+export function createPlannerEntry({id, requestId, day, goalId = null, stepId,
+                                    outcome, note = "", nextAction = "",
+                                    url = null, createdAt = null} = {}){
+  if(!ALL_OUTCOME.includes(outcome)) throw new Error(`未知的 outcome：${outcome}`);
+  const d = normalizeDue(day);
+  if(!d) throw new Error("entry.day 不得為空");
+  const s = optionalRefId(stepId, "entry.stepId");
+  if(!s) throw new Error("entry.stepId 不得為空");
+  const text = optionalText(note, PLANNER_LIMITS.note, "note");
+  if(!text) throw new Error("要先寫下這次做了什麼");
+  const next = optionalText(nextAction, PLANNER_LIMITS.nextAction, "nextAction");
+  // 記錄進度而沒有下一個動作，下次打開就只剩一段回憶，接不下去（§5）。
+  if(outcome === OUTCOME.PROGRESS && !next) throw new Error("要先寫下下一個動作");
+  return {
+    id: requireId(id, "pe"),
+    requestId: requireId(requestId, "req"),
+    day: d,
+    goalId: optionalRefId(goalId, "entry.goalId"),
+    stepId: s,
+    outcome,
+    note: text,
+    nextAction: next,
+    url: normalizeOutcomeUrl(url),
+    createdAt: normalizeInstant(createdAt, "entry.createdAt"),
+  };
+}
+
+export function createPlanner({version = PLANNER_VERSION, config = null} = {}){
+  return {
+    version: Number.isSafeInteger(version) && version > 0 ? version : PLANNER_VERSION,
+    config: createPlannerConfig(config || {}),
+    days: {},
+    stepDetails: {},
+    entries: [],
+  };
 }
