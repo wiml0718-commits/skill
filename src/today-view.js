@@ -51,6 +51,8 @@ export function createTodayView(store){
   let openDaily = false;
   let openCriteria = false;
   let openSwitch = false;
+  let openAnchor = false;
+  let anchorConfirm = null;   // 已有紀錄時改 anchor 的二次確認：待確認的天數
   let editingDate = null;
   let adjustingTime = false;
 
@@ -142,21 +144,40 @@ export function createTodayView(store){
         <button class="today-btn ghost" data-tact="actual-yesterday" data-value="${ATTENDANCE.WORK}">昨天也上班了</button>
         <button class="today-btn ghost" data-tact="actual-yesterday" data-value="${ATTENDANCE.REST}">昨天休息</button>
       </div>`}
-      ${phase === null ? renderAnchorSetup(today) : ""}
+      ${renderAnchorSetup(planner, today, phase)}
     </section>`;
   }
 
-  // 還沒設定班表時的最小入口。設定不是必填：沒設定就顯示未知，仍可手動排今天。
-  function renderAnchorSetup(today){
+  // 班表設定。設定不是必填：沒設定就顯示未知，仍可手動排今天。設定過之後也要
+  // 改得動——日期或班別選錯的話，這是唯一能修正的地方。
+  function renderAnchorSetup(planner, today, phase){
+    if(phase !== null && !openAnchor){
+      return `<div class="today-row">
+        <button class="today-btn ghost" data-tact="fold-anchor">編輯四日班表</button>
+      </div>`;
+    }
+    const config = planner.config;
+    const date = config.anchorDate || today;
     const options = PHASE_LABEL.map((label, i) =>
-      `<option value="${i}">${esc(label)}</option>`).join("");
+      `<option value="${i}" ${config.anchorPhase === i ? "selected" : ""}>${esc(label)}</option>`
+    ).join("");
     return `<div class="today-setup">
-      <div class="today-muted">設定四日班表：選一個日期，並指出那天是循環的哪一天。</div>
+      <div class="today-muted">四日班表：選一個日期，並指出那天是循環的哪一天。</div>
       <div class="today-row">
-        <input class="today-input" type="date" id="today-anchor-date" value="${today}" aria-label="班表起算日"/>
+        <input class="today-input" type="date" id="today-anchor-date" value="${date}" aria-label="班表起算日"/>
         <select class="today-input" id="today-anchor-phase" aria-label="起算日的班別">${options}</select>
-        <button class="today-btn" data-tact="save-anchor">儲存班表</button>
       </div>
+      <div class="today-row">
+        <button class="today-btn" data-tact="save-anchor">儲存班表</button>
+        ${phase === null ? "" : `<button class="today-btn ghost" data-tact="fold-anchor">取消</button>`}
+      </div>
+      ${anchorConfirm ? `<div class="today-editor">
+        <div class="today-err" role="alert">已經有 ${anchorConfirm} 天的紀錄。改起算日會讓過去的原定班別整批位移（實際出勤紀錄不受影響）。</div>
+        <div class="today-row">
+          <button class="today-btn primary" data-tact="save-anchor" data-force="1">確定要改</button>
+          <button class="today-btn ghost" data-tact="cancel-anchor">維持原設定</button>
+        </div>
+      </div>` : ""}
     </div>`;
   }
 
@@ -419,7 +440,13 @@ export function createTodayView(store){
 
   // ── 6. 日常維持 ──────────────────────────────────────────────────────────
   function renderDaily({state, planner, today, day}){
-    const items = state.steps.filter(s => s.kind === STEP_KIND.DAILY && !s.archived);
+    // 目標收掉之後，它底下的每日任務也跟著離開可行動範圍——任務頁與到期提醒
+    // 都已經這樣做了。今日頁不跟上就會變成繼續替一個封存目標賺 XP 的側門。
+    const activeGoals = new Set(state.goals
+      .filter(g => g.status === GOAL_STATUS.ACTIVE).map(g => g.id));
+    const items = state.steps.filter(s =>
+      s.kind === STEP_KIND.DAILY && !s.archived
+      && (s.goalId === null || activeGoals.has(s.goalId)));
     if(!items.length) return "";
     const suggestion = suggestForDay(planner, today, today);
     // 加班、低精力、收工時預設收合：它們是可選的，不是主線的前置條件（§5）。
@@ -634,16 +661,25 @@ export function createTodayView(store){
           ? `可用時間只有 ${res.day.plannedMinutes} 分鐘，已縮到上限`
           : "已更新本次時間");
       }
+      if(tact === "fold-anchor"){
+        openAnchor = !openAnchor;
+        anchorConfirm = null;
+        return repaint();
+      }
+      if(tact === "cancel-anchor"){ anchorConfirm = null; return repaint(); }
       if(tact === "save-anchor"){
         const res = store.setPlannerConfig({
           anchorDate: value("today-anchor-date"),
           anchorPhase: Number(value("today-anchor-phase")),
+          force: el.dataset.force === "1",
         });
+        // 已經有紀錄時不直接改，但也不是改不了：講清楚影響再讓使用者決定。
         if(!res.ok && res.reason === "has-days"){
-          say("error", `已經有 ${res.days} 天的紀錄，改起算日會讓過去的班別整批位移，因此保留原設定。`);
+          anchorConfirm = res.days;
           return repaint();
         }
-        return apply(res, "已設定四日班表");
+        if(res.ok){ openAnchor = false; anchorConfirm = null; }
+        return apply(res, "已更新四日班表");
       }
       if(tact === "save-bindings"){
         const bindings = {};

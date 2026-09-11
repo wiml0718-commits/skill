@@ -272,14 +272,16 @@ test("toJSON 給出可直接寫進備份檔的資料", () => {
   assert.deepEqual(JSON.parse(JSON.stringify(dump)), dump, "必須可 JSON 序列化");
 });
 
-test("backend 寫入失敗時不讓呼叫端崩潰", () => {
+test("backend 寫入失敗時丟出 WriteError，記憶體狀態整個回復", () => {
   const store = createStore({
     getItem: () => null,
     setItem: () => {throw new Error("QuotaExceeded");},
   });
   store.load();
-  assert.doesNotThrow(() => store.addGoal({title: "仍可操作", coreId: "body"}));
-  assert.equal(store.getState().goals.length, 1);
+  // 回傳一個正常的 goal 卻沒寫進去，等於讓畫面顯示一個重開就消失的成功。
+  assert.throws(() => store.addGoal({title: "沒寫進去", coreId: "body"}),
+                {name: "WriteError", reason: "write"});
+  assert.equal(store.getState().goals.length, 0, "失敗的變更不留在記憶體裡");
 });
 
 test("順延經由 store 也會累加計數", () => {

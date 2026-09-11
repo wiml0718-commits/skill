@@ -27,6 +27,26 @@ export const DAMAGED_KEY = "skill-damaged-v2";
 // v2 → v3 升級前的原樣快照。升級是不可逆的，留不成就不准寫升級結果。
 export const UPGRADE_BACKUP_KEY = "skill-backup-v2";
 
+// 寫入失敗的統一型別。呼叫端只要顯示 message 就是誠實的說法，不必各自翻譯
+// reason；型別本身讓 UI 分得出「沒寫進去」與「這件事本來就不該做」。
+export const WRITE_FAIL_TEXT = {
+  conflict: "另一個分頁已經存了新的資料。這次的變更沒有保存，也沒有覆蓋對方的資料；請重新載入頁面後再試一次。",
+  degraded: "讀不到瀏覽器儲存空間，這次的變更沒有保存。",
+  unsupported: "這份存檔是較新版本寫的，這次的變更沒有保存，也不會覆蓋原本的資料。",
+  readonly: "目前是唯讀模式，這次的變更沒有保存。請先處理載入時回報的資料問題。",
+  write: "沒有保存：瀏覽器儲存空間可能已滿。請清出空間後再試一次。",
+  serialize: "沒有保存，請再試一次。",
+  read: "沒有保存，請再試一次。",
+};
+
+export class WriteError extends Error {
+  constructor(reason){
+    super(WRITE_FAIL_TEXT[reason] || "沒有保存，請再試一次。");
+    this.name = "WriteError";
+    this.reason = reason;
+  }
+}
+
 // backend 介面只需要 getItem / setItem，方便替換與測試。
 function memoryBackend(){
   const m = new Map();
@@ -204,11 +224,11 @@ function sanitize(raw){
   // 根 version 決定缺 planner 算不算損失：v2 沒有 planner 是正常的，v3 沒有
   // 代表這份資料被截斷了。
   const storedVersion = Number.isSafeInteger(raw.version) ? raw.version : 2;
-  if(storedVersion >= SCHEMA_VERSION
-     && (!raw.planner || typeof raw.planner !== "object")){
+  const isV3 = storedVersion >= SCHEMA_VERSION;
+  if(isV3 && (!raw.planner || typeof raw.planner !== "object")){
     report.missingSections += 1;
   }
-  data.planner = sanitizePlanner(raw.planner, report);
+  data.planner = sanitizePlanner(raw.planner, report, {strict: isV3});
 
   return {data, report};
 }
@@ -218,12 +238,24 @@ function sanitize(raw){
 //
 // 指向已不存在的 goal / step 的紀錄一律保留：成果是使用者寫下的事實，
 // 目標被刪掉不代表那件事沒發生。畫面自己決定顯不顯示得出來。
-function sanitizePlanner(raw, report){
+function sanitizePlanner(raw, report, {strict = false} = {}){
   const src = raw && typeof raw === "object" ? raw : {};
   const planner = model.createPlanner({version: src.version});
   // config 壞掉只退回未設定：為了一個壞掉的 anchor 丟掉整份成果不成比例。
+  // 但那是一整段設定不見了，v3 的資料要計入損失，不能靜默歸零。
   try{ planner.config = model.createPlannerConfig(src.config || {}); }
-  catch{ planner.config = model.createPlannerConfig({}); }
+  catch{
+    planner.config = model.createPlannerConfig({});
+    if(strict) report.missingSections += 1;
+  }
+
+  // v3 的 planner 少了一整段（被截斷的備份）跟 steps 整段不見是同一件事：
+  // 補一個空容器就回報成功，會讓匯入靜默清掉整份班表與成果。
+  if(strict){
+    if(!src.days || typeof src.days !== "object") report.missingSections += 1;
+    if(!src.stepDetails || typeof src.stepDetails !== "object") report.missingSections += 1;
+    if(!Array.isArray(src.entries)) report.missingSections += 1;
+  }
 
   const days = src.days && typeof src.days === "object" ? src.days : {};
   for(const [date, value] of Object.entries(days)){
@@ -422,6 +454,15 @@ export function createStore(backend = defaultBackend()){
     return {ok: true, value};
   }
 
+  // 會改到資料的公開方法都走這裡。transact() 已經保證「寫得進去才採用」，
+  // mutate() 再把失敗轉成 WriteError 丟出去——回傳正常值卻沒寫進去，等於讓
+  // 畫面顯示一個重開就會消失的成功。
+  function mutate(apply){
+    const out = transact(apply);
+    if(!out.ok) throw new WriteError(out.reason);
+    return out.value;
+  }
+
   // 成就只加不減（§6.2）：判定是純函式，這裡只負責把新達成的那幾筆補上時間。
   // 資料之後怎麼變都不會把已解鎖的收回去——收回等於否認使用者做過的事。
   function unlockAchievements(today){
@@ -554,9 +595,16 @@ export function createStore(backend = defaultBackend()){
     return i;
   }
 
+  // 只改狀態的那幾個轉換共用同一條路徑，省得每個都重寫一次查找。
+  function applyToStep(id, fn, ...args){
+    const i = findStep(id);
+    return replaceStep(i, fn(data.steps[i], ...args));
+  }
+
+  // 只換掉那一筆，不落地：落地由外層的 mutate() 統一處理，否則同一次操作會
+  // 寫兩次，而且中途失敗時前半段已經寫進去了。
   function replaceStep(i, step){
     data.steps = data.steps.map((s, n) => (n === i ? step : s));
-    commit();
     return copyStep(step);
   }
 
@@ -679,7 +727,7 @@ export function createStore(backend = defaultBackend()){
     },
 
     save(){
-      commit();
+      mutate(() => {});
       return store.getState();
     },
 
@@ -695,17 +743,19 @@ export function createStore(backend = defaultBackend()){
 
     // 沒有東西可報的那幾天也要記下來，不然每次開 App 都要重算一次昨天。
     markDailySummarySeen(){
-      data.meta = {...data.meta, lastDailySummaryDate: logicalToday()};
-      commit();
-      return data.meta.lastDailySummaryDate;
+      return mutate(() => {
+        data.meta = {...data.meta, lastDailySummaryDate: logicalToday()};
+        return data.meta.lastDailySummaryDate;
+      });
     },
 
     weeklyReview(){return weeklySummary(store.getState(), logicalToday());},
 
     markWeeklyReviewSeen(){
-      data.meta = {...data.meta, lastWeeklyReviewDate: logicalToday()};
-      commit();
-      return data.meta.lastWeeklyReviewDate;
+      return mutate(() => {
+        data.meta = {...data.meta, lastWeeklyReviewDate: logicalToday()};
+        return data.meta.lastWeeklyReviewDate;
+      });
     },
 
     // ── 成就（§6.2）─────────────────────────────────────────────────────────
@@ -721,18 +771,20 @@ export function createStore(backend = defaultBackend()){
 
     // ── Goal ────────────────────────────────────────────────────────────────
     addGoal({title, why = "", coreId = null} = {}){
-      const goal = model.createGoal({title, why, coreId});
-      data.goals = [...data.goals, goal];
-      commit();
-      return copy(goal);
+      return mutate(() => {
+        const goal = model.createGoal({title, why, coreId});
+        data.goals = [...data.goals, goal];
+        return copy(goal);
+      });
     },
 
     updateGoal(id, patch = {}){
-      const i = findGoal(id);
-      const goal = model.createGoal({...data.goals[i], ...patch, id});
-      data.goals = data.goals.map((g, n) => (n === i ? goal : g));
-      commit();
-      return copy(goal);
+      return mutate(() => {
+        const i = findGoal(id);
+        const goal = model.createGoal({...data.goals[i], ...patch, id});
+        data.goals = data.goals.map((g, n) => (n === i ? goal : g));
+        return copy(goal);
+      });
     },
 
     setGoalStatus(id, status){return store.updateGoal(id, {status});},
@@ -740,21 +792,23 @@ export function createStore(backend = defaultBackend()){
     // ── Step ────────────────────────────────────────────────────────────────
     addStep({goalId = null, kind, title, due = null, dueTime = null, desc = "",
              xp, rewards} = {}){
-      if(goalId !== null) findGoal(goalId);
-      const k = kind || (goalId === null ? model.STEP_KIND.INBOX : model.STEP_KIND.MAIN);
-      const step = model.createStep({
-        goalId, kind: k, title, due, dueTime, desc, xp, rewards,
-        createdAt: new Date().toISOString(),
-        order: model.nextOrder(data.steps, k === model.STEP_KIND.INBOX ? null : goalId),
+      return mutate(() => {
+        if(goalId !== null) findGoal(goalId);
+        const k = kind || (goalId === null ? model.STEP_KIND.INBOX : model.STEP_KIND.MAIN);
+        const step = model.createStep({
+          goalId, kind: k, title, due, dueTime, desc, xp, rewards,
+          createdAt: new Date().toISOString(),
+          order: model.nextOrder(data.steps, k === model.STEP_KIND.INBOX ? null : goalId),
+        });
+        requireAttribution(step);
+        data.steps = [...data.steps, step];
+        return copyStep(step);
       });
-      requireAttribution(step);
-      data.steps = [...data.steps, step];
-      commit();
-      return copyStep(step);
     },
 
     // 編輯。歸屬是儲存前的必要條件，改壞了同樣擋下來（§4.3）。
     updateStep(id, patch = {}){
+      return mutate(() => {
       const i = findStep(id);
       const prev = data.steps[i];
       if(patch.goalId !== undefined && patch.goalId !== null) findGoal(patch.goalId);
@@ -769,49 +823,56 @@ export function createStore(backend = defaultBackend()){
         step.deferCount = 0;
       }
       return replaceStep(i, step);
+      });
     },
 
     deleteStep(id){
-      const i = findStep(id);
-      const gone = data.steps[i];
-      data.steps = data.steps.filter((s, n) => n !== i);
-      commit();
-      return copyStep(gone);
+      return mutate(() => {
+        const i = findStep(id);
+        const gone = data.steps[i];
+        data.steps = data.steps.filter((s, n) => n !== i);
+        return copyStep(gone);
+      });
     },
 
     // 封存與 state 正交：只決定顯不顯示在清單裡，不改變完成或放棄（§3.5）。
     archiveStep(id, on = true){
-      const i = findStep(id);
-      return replaceStep(i, {...data.steps[i], archived: on === true,
-                             archivedAt: on === true ? new Date().toISOString() : null});
+      return mutate(() => {
+        const i = findStep(id);
+        return replaceStep(i, {...data.steps[i], archived: on === true,
+                               archivedAt: on === true ? new Date().toISOString() : null});
+      });
     },
 
     // 批次封存 / 清除。daily 不進 DONE（§5.1），連遷移進來還停在 DONE 的也一併
     // 排除——把它封存掉等於把一個還在跑的習慣藏起來。
     archiveDoneSteps(){
-      const at = new Date().toISOString();
-      let count = 0;
-      data.steps = data.steps.map(s => {
-        if(s.state !== model.STEP_STATE.DONE || s.archived) return s;
-        if(s.kind === model.STEP_KIND.DAILY) return s;
-        count += 1;
-        return {...s, archived: true, archivedAt: at};
+      return mutate(() => {
+        const at = new Date().toISOString();
+        let count = 0;
+        data.steps = data.steps.map(s => {
+          if(s.state !== model.STEP_STATE.DONE || s.archived) return s;
+          if(s.kind === model.STEP_KIND.DAILY) return s;
+          count += 1;
+          return {...s, archived: true, archivedAt: at};
+        });
+        return count;
       });
-      commit();
-      return count;
     },
 
     deleteSteps(pred){
-      const before = data.steps.length;
-      data.steps = data.steps.filter(s => !pred(copyStep(s)));
-      commit();
-      return before - data.steps.length;
+      return mutate(() => {
+        const before = data.steps.length;
+        data.steps = data.steps.filter(s => !pred(copyStep(s)));
+        return before - data.steps.length;
+      });
     },
 
     // 完成即發放 XP（§4.2）。每日任務不進 DONE，改記 streak（§5.1）。
     // 收件匣是唯一沒有事先歸屬的 kind，完成時才要求指定核心（§4.3），
     // 沒指定就不完成——這個摩擦只發生在真的要記分的那一刻。
     completeStep(id, {coreId = null} = {}){
+      return mutate(() => {
       const i = findStep(id);
       let step = data.steps[i];
       if(step.kind === model.STEP_KIND.INBOX
@@ -828,10 +889,12 @@ export function createStore(backend = defaultBackend()){
                     completedAt: new Date().toISOString()};
       grantForStep(next, today);
       return replaceStep(i, next);
+      });
     },
 
     // 補登：把過去 3 天內的日期補進 streakHistory，XP 記在被補登的那一天（§5.1）
     backfillDaily(id, date){
+      return mutate(() => {
       const i = findStep(id);
       const step = data.steps[i];
       if(step.kind !== model.STEP_KIND.DAILY) throw new Error("只有每日任務可以補登");
@@ -840,48 +903,36 @@ export function createStore(backend = defaultBackend()){
         throw new Error(`只能補登過去 ${BACKFILL_DAYS} 天內的日期`);
       }
       return markDaily(i, day);
+      });
     },
 
-    deferStep(id){
-      const i = findStep(id);
-      return replaceStep(i, model.deferStep(data.steps[i]));
-    },
+    deferStep(id){return mutate(() => applyToStep(id, model.deferStep));},
 
-    reopenStep(id){
-      const i = findStep(id);
-      return replaceStep(i, model.reopenStep(data.steps[i]));
-    },
+    reopenStep(id){return mutate(() => applyToStep(id, model.reopenStep));},
 
-    noteStep(id){
-      const i = findStep(id);
-      return replaceStep(i, model.noteStep(data.steps[i]));
-    },
+    noteStep(id){return mutate(() => applyToStep(id, model.noteStep));},
 
-    dropStep(id){
-      const i = findStep(id);
-      return replaceStep(i, model.dropStep(data.steps[i]));
-    },
+    dropStep(id){return mutate(() => applyToStep(id, model.dropStep));},
 
-    scheduleStep(id, due){
-      const i = findStep(id);
-      return replaceStep(i, model.scheduleStep(data.steps[i], due));
-    },
+    scheduleStep(id, due){return mutate(() => applyToStep(id, model.scheduleStep, due));},
 
     // 收件匣項目歸入目標時轉成主線並排到最後，不插隊搶走現有的下一步。
     // 指派之後就不再是收件匣，因此歸屬必須當場成立：沿用該目標的 coreId，
     // 目標沒綁核心也沒有 rewards 時擋下來（§4.3）。
     assignStep(id, goalId){
-      const i = findStep(id);
-      if(goalId !== null) findGoal(goalId);
-      const kind = goalId === null ? model.STEP_KIND.INBOX : model.STEP_KIND.MAIN;
-      const step = model.createStep({
-        ...data.steps[i],
-        goalId,
-        kind,
-        order: model.nextOrder(data.steps.filter(s => s.id !== id), goalId),
+      return mutate(() => {
+        const i = findStep(id);
+        if(goalId !== null) findGoal(goalId);
+        const kind = goalId === null ? model.STEP_KIND.INBOX : model.STEP_KIND.MAIN;
+        const step = model.createStep({
+          ...data.steps[i],
+          goalId,
+          kind,
+          order: model.nextOrder(data.steps.filter(s => s.id !== id), goalId),
+        });
+        requireAttribution(step);
+        return replaceStep(i, step);
       });
-      requireAttribution(step);
-      return replaceStep(i, step);
     },
 
     // ── 手動調整（§4.4）─────────────────────────────────────────────────────
@@ -889,18 +940,19 @@ export function createStore(backend = defaultBackend()){
     // 技能 XP 不得低於 0：扣減量超過現有 XP 時只扣到 0，並以實際變動量記錄，
     // 這樣 xpLog 的加總永遠等於目前 XP。
     adjustSkillXp(skillId, delta){
-      const i = findSkill(skillId);
-      if(!Number.isSafeInteger(delta)) throw new Error("XP 變動量必須是整數");
-      const before = data.skills[i].xp;
-      const actual = Math.max(0, before + delta) - before;
-      // 什麼都沒變就不留紀錄，否則會在 activeDays 裡多出一個沒有活動的日子。
-      if(actual !== 0){
-        bumpSkill(skillId, actual);
-        addXpEntry({date: logicalToday(), skillId, xp: actual,
-                    source: model.XP_SOURCE.MANUAL});
-      }
-      commit();
-      return copySkill(data.skills[findSkill(skillId)]);
+      return mutate(() => {
+        const i = findSkill(skillId);
+        if(!Number.isSafeInteger(delta)) throw new Error("XP 變動量必須是整數");
+        const before = data.skills[i].xp;
+        const actual = Math.max(0, before + delta) - before;
+        // 什麼都沒變就不留紀錄，否則會在 activeDays 裡多出一個沒有活動的日子。
+        if(actual !== 0){
+          bumpSkill(skillId, actual);
+          addXpEntry({date: logicalToday(), skillId, xp: actual,
+                      source: model.XP_SOURCE.MANUAL});
+        }
+        return copySkill(data.skills[findSkill(skillId)]);
+      });
     },
 
     // 直接輸入目標值：寫入的是差額，不是新值本身。
@@ -915,6 +967,7 @@ export function createStore(backend = defaultBackend()){
     // 事後指定核心（§4.3.1）：更新那筆紀錄的 skillId，不新增一筆，
     // 否則同一次完成會被算兩次。
     assignXpEntry(entryId, coreId){
+      return mutate(() => {
       const i = data.xpLog.findIndex(e => e.id === entryId);
       if(i < 0) throw new Error(`找不到 xpLog：${entryId}`);
       const entry = data.xpLog[i];
@@ -926,8 +979,8 @@ export function createStore(backend = defaultBackend()){
       data.profile = {...data.profile,
                       unassignedXP: Math.max(0, data.profile.unassignedXP - entry.xp)};
       data.xpLog = data.xpLog.map((e, n) => (n === i ? {...e, skillId} : e));
-      commit();
       return copy(data.xpLog[i]);
+      });
     },
 
     // ── 合併技能（§4.5）─────────────────────────────────────────────────────
@@ -935,6 +988,7 @@ export function createStore(backend = defaultBackend()){
     // 既有 XP，寫進實際金額會讓當天的成果數字整批膨脹。
     mergeSkills({sourceIds = [], coreId, name, icon = "", desc = "", source = "",
                  type = model.SKILL_TYPE.ACTIVE, notes = []} = {}){
+      return mutate(() => {
       const ids = [...new Set(sourceIds)];
       const sources = ids.map(id => data.skills[findSkill(id)]);
       if(sources.length < 2) throw new Error("合併至少需要兩個技能");
@@ -970,8 +1024,8 @@ export function createStore(backend = defaultBackend()){
       });
       addXpEntry({date: logicalToday(), skillId: merged.id, xp: 0,
                   source: model.XP_SOURCE.MERGE, refId: merged.id});
-      commit();
       return copySkill(merged);
+      });
     },
 
     // ── 推導（轉呼叫 model，讓檢視只需要依賴 store）────────────────────────
@@ -1009,6 +1063,7 @@ export function createStore(backend = defaultBackend()){
 
     // 反向投影。只覆寫 legacy 認得的那部分，Goal/Step 層的資料原封不動。
     saveLegacyState(state = {}){
+      return mutate(() => {
       if(typeof state.charName === "string" && state.charName.trim()){
         data.profile = model.createProfile({...data.profile, charName: state.charName});
       }
@@ -1076,8 +1131,8 @@ export function createStore(backend = defaultBackend()){
           (g.coreId && !coreIds.has(g.coreId)) ? {...g, coreId: null} : g);
       }
 
-      commit();
       return store.getState();
+      });
     },
 
     // ── 今日計畫（planner, v3）──────────────────────────────────────────────
@@ -1263,13 +1318,14 @@ export function createStore(backend = defaultBackend()){
       if(isUnsupportedVersion(raw)){
         throw new Error("這份備份的版本比目前的 App 新，無法匯入，也不會覆蓋現有資料");
       }
-      const out = convert(raw);
-      data = out.data;
-      report = out.report;
-      migrated = out.looksV1;
-      fresh = false;
-      commit();
-      return store.getState();
+      return mutate(() => {
+        const out = convert(raw);
+        data = out.data;
+        report = out.report;
+        migrated = out.looksV1;
+        fresh = false;
+        return store.getState();
+      });
     },
   };
 

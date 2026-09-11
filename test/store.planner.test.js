@@ -427,8 +427,11 @@ test("任何一條寫入路徑都會擋下舊快照覆寫，不只今日計畫",
   const theirs = {...mine, profile: {...mine.profile, charName: "另一個分頁"}};
   be.put(STORAGE_KEY, theirs);
 
-  // 舊的那一頁按「新增目標」：記憶體會變，但不得寫進去
-  store.addGoal({title: "舊分頁新增的", coreId: "think"});
+  // 舊的那一頁按「新增目標」：丟出 WriteError，記憶體回復，對方的資料不動
+  assert.throws(() => store.addGoal({title: "舊分頁新增的", coreId: "think"}),
+                {name: "WriteError", reason: "conflict"});
+  assert.equal(store.getState().goals.length, mine.goals.length,
+               "沒寫進去的變更不留在記憶體裡");
   assert.equal(be.raw(STORAGE_KEY).profile.charName, "另一個分頁");
   assert.equal(be.raw(STORAGE_KEY).goals.length, mine.goals.length);
   const report = store.migrationReport();
@@ -482,4 +485,44 @@ test("只調低可用時間、沒動本次時間時，也會回報已縮到上�
   // 沒有被夾到時不要謊報
   const same = store.setDayPlan(today, {energy: m.ENERGY.HIGH});
   assert.equal(same.clamped, false);
+});
+
+// ── Codex Review 第 2 輪的回歸測試 ─────────────────────────────────────────
+test("v3 的 planner 被截斷：缺少的區段計入損失，不會靜默清掉班表與成果", () => {
+  const store = createStore(backend());
+  store.load();
+  const full = {version: SCHEMA_VERSION, profile: {}, cores: [], skills: [], goals: [],
+                steps: [], xpLog: [], achievements: [], meta: {},
+                planner: {version: 1, config: {anchorDate: null, anchorPhase: null,
+                                               goalBindings: {}},
+                          days: {}, stepDetails: {}, entries: []}};
+  assert.equal(store.inspect(full).total, 0, "完整的 v3 不算損失");
+
+  const truncated = {...full, planner: {version: 1}};
+  // days / stepDetails / entries 三段不見
+  assert.equal(store.inspect(truncated).total, 3);
+
+  const badConfig = {...full, planner: {...full.planner, config: {anchorDate: "壞", anchorPhase: 0}}};
+  assert.equal(store.inspect(badConfig).total, 1, "整段 config 歸零也是損失");
+});
+
+test("非今日計畫的寫入失敗同樣整個回復，不留下沒存進去的完成與 XP", () => {
+  const be = backend();
+  const {store, step} = seeded(be);
+  const before = store.getState();
+  const origSet = be.setItem;
+  be.setItem = (k, v) => {
+    if(k === STORAGE_KEY) throw new Error("quota");
+    origSet(k, v);
+  };
+  assert.throws(() => store.completeStep(step.id), {name: "WriteError", reason: "write"});
+  const after = store.getState();
+  assert.equal(after.steps.find(s => s.id === step.id).state, m.STEP_STATE.TODO);
+  assert.deepEqual(after.xpLog, before.xpLog);
+  assert.deepEqual(after.meta.activeDays, before.meta.activeDays);
+  assert.deepEqual(after.skills, before.skills);
+
+  assert.throws(() => store.adjustSkillXp(m.generalSkillId("think"), 50),
+                {name: "WriteError"});
+  assert.deepEqual(store.getState().skills, before.skills);
 });

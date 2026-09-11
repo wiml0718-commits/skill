@@ -325,9 +325,12 @@ test("唯讀模式下之後的編輯也不會落地", () => {
     setItem: k => {written.push(k);},
   });
   store.load();
-  store.addGoal({title: "這次不該被寫進去"});
-  store.addStep({title: "隨手記"});
+  assert.throws(() => store.addGoal({title: "這次不該被寫進去"}),
+                {name: "WriteError", reason: "degraded"});
+  assert.throws(() => store.addStep({title: "隨手記"}),
+                {name: "WriteError", reason: "degraded"});
   assert.deepEqual(written, []);
+  assert.equal(store.getState().goals.length, 0);
 });
 
 test("被截斷的 v2 備份會被算成損失，不會靜默清掉現有資料", () => {
@@ -548,9 +551,11 @@ test("原樣快照留不成時完全不寫，也不會謊稱已備份", () => {
   assert.equal(store.migrationReport().readOnly, true);
   assert.equal(map.get(STORAGE_KEY), raw, "壞掉的那份還在，沒有被丟過的版本蓋掉");
 
-  // 之後的編輯也不落地
-  store.addGoal({title: "新目標"});
+  // 之後的編輯也不落地，而且會明講沒有保存
+  assert.throws(() => store.addGoal({title: "新目標"}),
+                {name: "WriteError", reason: "readonly"});
   assert.equal(map.get(STORAGE_KEY), raw);
+  assert.equal(store.getState().goals.length, 0);
 });
 
 test("既有快照是更早的另一份時不覆蓋，也不覆寫現有 v2", () => {
