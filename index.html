@@ -7,18 +7,104 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
 <meta name="apple-mobile-web-app-title" content="技能樹"/>
 <meta name="theme-color" content="#050b12"/>
+<script>
+// 先套主題再畫第一幀。模組載入是非同步的，等 views.js 才設 data-theme 的話，
+// 偏好淺色的人會先看到一閃的深色畫面。
+// 這裡直接讀 store 的 key（src/store.js 的 STORAGE_KEY = "skill-rpg-v2"）與
+// planner.config.theme 的形狀 —— 是刻意的重複，test/theme.test.js 會比對兩邊
+// 沒有漂移。讀不到或壞掉一律當 auto，不讓開機卡在主題上。
+(function(){
+  var pref="auto";
+  try{
+    var raw=localStorage.getItem("skill-rpg-v2");
+    var t=raw?JSON.parse(raw):null;
+    t=t&&t.planner&&t.planner.config?t.planner.config.theme:null;
+    if(t==="light"||t==="dark")pref=t;
+  }catch(e){}
+  var mode=pref!=="auto"?pref
+    :(window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark");
+  document.documentElement.setAttribute("data-theme",mode);
+  var meta=document.querySelector('meta[name="theme-color"]');
+  if(meta)meta.setAttribute("content",mode==="light"?"#f5f2ea":"#050b12");
+})();
+</script>
 <link rel="manifest" href="manifest.json"/>
 <link rel="apple-touch-icon" href="icon-192.png"/>
 <title>人生技能樹</title>
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet"/>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+/* ── 主題 token ──────────────────────────────────────────────────────────
+   深色是預設值；淺色只覆寫同一組名字，其餘規則不必知道現在是哪一套。
+   實際套用的模式由 src/theme.js 寫進 <html data-theme>，一律是已解析的
+   light／dark，不會留 auto。 */
 :root{
+  color-scheme:dark;
   --bg:#050b12;--bg2:#0a1520;--bg3:#0f1f30;
-  --border:#1e3a4a;--border2:#2a4a6a;
-  --text:#e8dcc8;--text2:#8aaccа;--muted:#3a5a7a;--muted2:#2a4a6a;
+  --bg-nav:#0a1a2a;--bg-sheet:#0d1f2d;--border:#1e3a4a;
+  --border2:#2a4a6a;--border3:#5a7a9a;--text:#e8dcc8;
+  --text2:#8aacca;--text3:#b0c8d8;--muted:#3a5a7a;
+  --muted2:#2a4a6a;--scrim:rgba(0,0,0,.9);--on-accent:#fff;
+  --danger-bg:#1a0808;--warn-bg:#1a1000;--focus-wash:#1a140022;
+  --blue:#4a9eff;--amber:#f59e0b;--cyan:#22d3ee;
+  --purple:#a855f7;--red:#ef4444;--green:#10b981;
+  --orange:#f97316;--pink:#ec4899;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bot: env(safe-area-inset-bottom, 0px);
+}
+:root[data-theme="light"]{
+  color-scheme:light;
+  --bg:#f5f2ea;--bg2:#ece8dc;--bg3:#e3ddcd;
+  --bg-nav:#e8e3d5;--bg-sheet:#f0ece1;--border:#cdc3ac;
+  --border2:#b3a88c;--border3:#8a7d62;--text:#241d12;
+  --text2:#3f4b59;--text3:#34404d;--muted:#5f5849;
+  --muted2:#746d5d;--scrim:rgba(20,16,8,.45);--on-accent:#fff;
+  --danger-bg:#f8e7e4;--warn-bg:#f8f0d9;--focus-wash:#c8a23a26;
+  --blue:#1565c0;--amber:#9b6204;--cyan:#0f7a8a;
+  --purple:#7127c8;--red:#c0281f;--green:#0a6c4d;
+  --orange:#a8480a;--pink:#b4246e;
+}
+/* 透明度階層由基色推導，因此只需要定義一次：基色換了色階自動跟著換。
+   名字沿用原本的十六進位 alpha（--blue-22 等於舊的 #4a9eff22）。 */
+:root{
+  --blue-0f:color-mix(in srgb,var(--blue) 5.9%,transparent);
+  --blue-11:color-mix(in srgb,var(--blue) 6.7%,transparent);
+  --blue-12:color-mix(in srgb,var(--blue) 7.1%,transparent);
+  --blue-18:color-mix(in srgb,var(--blue) 9.4%,transparent);
+  --blue-22:color-mix(in srgb,var(--blue) 13.3%,transparent);
+  --blue-33:color-mix(in srgb,var(--blue) 20%,transparent);
+  --blue-44:color-mix(in srgb,var(--blue) 26.7%,transparent);
+  --blue-55:color-mix(in srgb,var(--blue) 33.3%,transparent);
+  --blue-66:color-mix(in srgb,var(--blue) 40%,transparent);
+  --blue-77:color-mix(in srgb,var(--blue) 46.7%,transparent);
+  --blue-88:color-mix(in srgb,var(--blue) 53.3%,transparent);
+  --amber-18:color-mix(in srgb,var(--amber) 9.4%,transparent);
+  --amber-22:color-mix(in srgb,var(--amber) 13.3%,transparent);
+  --amber-33:color-mix(in srgb,var(--amber) 20%,transparent);
+  --amber-44:color-mix(in srgb,var(--amber) 26.7%,transparent);
+  --amber-55:color-mix(in srgb,var(--amber) 33.3%,transparent);
+  --amber-66:color-mix(in srgb,var(--amber) 40%,transparent);
+  --amber-77:color-mix(in srgb,var(--amber) 46.7%,transparent);
+  --cyan-18:color-mix(in srgb,var(--cyan) 9.4%,transparent);
+  --cyan-22:color-mix(in srgb,var(--cyan) 13.3%,transparent);
+  --cyan-55:color-mix(in srgb,var(--cyan) 33.3%,transparent);
+  --cyan-66:color-mix(in srgb,var(--cyan) 40%,transparent);
+  --purple-11:color-mix(in srgb,var(--purple) 6.7%,transparent);
+  --purple-18:color-mix(in srgb,var(--purple) 9.4%,transparent);
+  --purple-22:color-mix(in srgb,var(--purple) 13.3%,transparent);
+  --purple-33:color-mix(in srgb,var(--purple) 20%,transparent);
+  --purple-55:color-mix(in srgb,var(--purple) 33.3%,transparent);
+  --purple-77:color-mix(in srgb,var(--purple) 46.7%,transparent);
+  --red-12:color-mix(in srgb,var(--red) 7.1%,transparent);
+  --red-44:color-mix(in srgb,var(--red) 26.7%,transparent);
+  --red-55:color-mix(in srgb,var(--red) 33.3%,transparent);
+  --red-66:color-mix(in srgb,var(--red) 40%,transparent);
+  --green-12:color-mix(in srgb,var(--green) 7.1%,transparent);
+  --green-18:color-mix(in srgb,var(--green) 9.4%,transparent);
+  --green-44:color-mix(in srgb,var(--green) 26.7%,transparent);
+  --green-55:color-mix(in srgb,var(--green) 33.3%,transparent);
+  --orange-22:color-mix(in srgb,var(--orange) 13.3%,transparent);
+  --orange-66:color-mix(in srgb,var(--orange) 40%,transparent);
 }
 html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:'Share Tech Mono',monospace;}
 #app{height:100%;display:flex;flex-direction:column;}
@@ -27,14 +113,14 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 #navbar{
   display:flex;align-items:center;justify-content:space-between;
   padding:calc(12px + var(--safe-top)) 16px 10px;
-  background:linear-gradient(180deg,#0a1a2a,var(--bg));
+  background:linear-gradient(180deg,var(--bg-nav),var(--bg));
   border-bottom:1px solid var(--border);
   flex-shrink:0;
 }
 .nav-title{font-family:'Cinzel',serif;font-size:15px;letter-spacing:2px;color:var(--text);}
-.nav-sub{font-size:9px;letter-spacing:3px;color:#4a9eff;margin-top:2px;}
+.nav-sub{font-size:9px;letter-spacing:3px;color:var(--blue);margin-top:2px;}
 .nav-stat{text-align:right;}
-.nav-stat-val{font-family:'Cinzel',serif;font-size:16px;color:#f59e0b;}
+.nav-stat-val{font-family:'Cinzel',serif;font-size:16px;color:var(--amber);}
 .nav-stat-lbl{font-size:8px;color:var(--muted);margin-top:1px;}
 
 /* ── Tab Bar ── */
@@ -44,7 +130,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 }
 .tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
   padding:10px 4px;cursor:pointer;transition:all .2s;border:none;background:none;color:var(--muted);font-size:8px;letter-spacing:1px;gap:3px;}
-.tab.active{color:#4a9eff;}
+.tab.active{color:var(--blue);}
 .tab-icon{font-size:18px;}
 
 /* ── Main Content ── */
@@ -123,12 +209,12 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 
 /* ── Modal ── */
 .modal-overlay{
-  position:fixed;inset:0;background:rgba(0,0,0,.9);
+  position:fixed;inset:0;background:var(--scrim);
   display:flex;align-items:flex-end;justify-content:center;
   z-index:300;backdrop-filter:blur(6px);
 }
 .modal-sheet{
-  background:linear-gradient(160deg,#0d1f2d,var(--bg));
+  background:linear-gradient(160deg,var(--bg-sheet),var(--bg));
   border-radius:20px 20px 0 0;border-top:1px solid var(--border2);
   width:100%;max-height:92vh;overflow-y:auto;
   padding:8px 18px calc(20px + var(--safe-bot));
@@ -141,7 +227,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 .form-input{width:100%;background:var(--bg);border:1px solid var(--border2);border-radius:8px;
   padding:10px 12px;color:var(--text);font-family:'Share Tech Mono',monospace;font-size:13px;
   outline:none;margin-bottom:12px;}
-.form-input:focus{border-color:#4a9eff88;}
+.form-input:focus{border-color:var(--blue-88);}
 .form-select{width:100%;background:var(--bg);border:1px solid var(--border2);border-radius:8px;
   padding:10px 12px;color:var(--text);font-family:'Share Tech Mono',monospace;font-size:13px;
   outline:none;margin-bottom:12px;-webkit-appearance:none;}
@@ -150,20 +236,20 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
   background:var(--bg);color:var(--muted);transition:all .2s;}
 .xp-input-row{display:flex;align-items:center;gap:8px;margin-bottom:4px;}
 .xp-num{width:80px;background:var(--bg);border-radius:8px;padding:10px;
-  color:#f59e0b;font-family:'Cinzel',serif;font-size:18px;font-weight:700;
-  border:1px solid #f59e0b66;outline:none;text-align:center;}
+  color:var(--amber);font-family:'Cinzel',serif;font-size:18px;font-weight:700;
+  border:1px solid var(--amber-66);outline:none;text-align:center;}
 .xp-quick{flex:1;display:flex;flex-wrap:wrap;gap:5px;}
 .xp-qbtn{border:1px solid var(--border);background:var(--bg);color:var(--muted);
   border-radius:6px;padding:4px 9px;cursor:pointer;font-size:10px;}
 .notes-list{margin-bottom:8px;}
 .note-item{display:flex;gap:7px;align-items:flex-start;margin-bottom:6px;}
 .note-text{flex:1;background:var(--bg);border:1px solid var(--border);border-radius:6px;
-  padding:6px 9px;font-size:10px;color:#b0c8d8;line-height:1.5;white-space:pre-wrap;}
+  padding:6px 9px;font-size:10px;color:var(--text3);line-height:1.5;white-space:pre-wrap;}
 .note-text.collapsed{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
-.note-toggle{font-size:9px;color:#a855f7;cursor:pointer;margin-top:3px;display:inline-block;
+.note-toggle{font-size:9px;color:var(--purple);cursor:pointer;margin-top:3px;display:inline-block;
   font-family:'Share Tech Mono',monospace;}
 .note-date{font-size:8px;color:var(--muted2);display:block;margin-top:2px;}
-.note-del{background:none;border:none;color:#ef444466;cursor:pointer;font-size:14px;padding:4px;flex-shrink:0;}
+.note-del{background:none;border:none;color:var(--red-66);cursor:pointer;font-size:14px;padding:4px;flex-shrink:0;}
 .note-add-row{display:flex;gap:6px;}
 .note-add-input{flex:1;background:var(--bg);border:1px solid var(--border);border-radius:7px;
   padding:8px 10px;color:var(--text);font-size:11px;outline:none;font-family:'Share Tech Mono',monospace;}
@@ -172,7 +258,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 .modal-actions{display:flex;gap:8px;margin-top:18px;}
 .btn-save{flex:1;border:none;border-radius:8px;padding:12px;cursor:pointer;
   font-family:'Cinzel',serif;font-size:12px;letter-spacing:1px;transition:opacity .2s;}
-.btn-del{background:#1a0808;border:1px solid #ef444455;color:#ef4444;
+.btn-del{background:var(--danger-bg);border:1px solid var(--red-55);color:var(--red);
   border-radius:8px;padding:12px 16px;cursor:pointer;font-size:12px;}
 
 /* ── Back button ── */
@@ -197,7 +283,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 
 /* ── toast ── */
 #toast{position:fixed;bottom:calc(80px + var(--safe-bot));left:50%;transform:translateX(-50%);
-  background:#22d3ee22;border:1px solid #22d3ee66;color:#22d3ee;
+  background:var(--cyan-22);border:1px solid var(--cyan-66);color:var(--cyan);
   padding:7px 18px;border-radius:20px;font-size:11px;
   opacity:0;transition:opacity .3s;pointer-events:none;z-index:999;white-space:nowrap;}
 #toast.show{opacity:1;}
@@ -212,28 +298,28 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 .qtab{flex:1;padding:7px 4px;border-radius:20px;cursor:pointer;font-size:10px;
   letter-spacing:1px;border:1px solid var(--border);background:transparent;
   color:var(--muted);transition:all .2s;text-align:center;}
-.qtab.active{color:#fff;}
+.qtab.active{color:var(--on-accent);}
 .quest-card{border-radius:12px;padding:13px 14px;margin-bottom:9px;
   border:1px solid var(--border);background:var(--bg3);
   position:relative;overflow:hidden;transition:all .2s;}
 .quest-card:active{transform:scale(.98);}
 .quest-card.done{opacity:.5;}
-.quest-card.overdue{border-color:#ef444455;}
+.quest-card.overdue{border-color:var(--red-55);}
 .quest-badge{display:inline-flex;align-items:center;gap:3px;font-size:9px;
   padding:2px 7px;border-radius:4px;font-weight:700;letter-spacing:1px;margin-bottom:7px;}
 .quest-title{font-size:14px;font-weight:700;color:var(--text);margin-bottom:3px;
   display:flex;align-items:center;gap:7px;}
 .quest-desc{font-size:10px;color:var(--muted);margin-bottom:6px;line-height:1.5;}
 .quest-meta{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;}
-.quest-reward{font-size:10px;color:#f59e0b;}
+.quest-reward{font-size:10px;color:var(--amber);}
 .quest-due{font-size:9px;}
-.quest-due.overdue{color:#ef4444;}
-.quest-due.soon{color:#f97316;}
+.quest-due.overdue{color:var(--red);}
+.quest-due.soon{color:var(--orange);}
 .quest-due.ok{color:var(--muted2);}
 .quest-complete-btn{border:none;border-radius:8px;padding:5px 11px;cursor:pointer;
   font-size:11px;font-family:'Cinzel',serif;letter-spacing:1px;flex-shrink:0;}
 /* ── Goal / Step styles ── */
-.goal-add{width:100%;background:#4a9eff11;border:1px dashed var(--border2);color:#4a9eff;
+.goal-add{width:100%;background:var(--blue-11);border:1px dashed var(--border2);color:var(--blue);
   border-radius:12px;padding:11px;cursor:pointer;font-size:11px;margin-bottom:10px;
   font-family:inherit;letter-spacing:1px;}
 .goal-card{background:linear-gradient(135deg,var(--bg3),var(--bg2));
@@ -246,7 +332,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 .step-card{background:linear-gradient(135deg,var(--bg3),var(--bg2));
   border:1px solid var(--border);border-radius:12px;padding:12px 13px;margin-bottom:9px;}
 .step-main{display:flex;align-items:center;gap:10px;}
-.step-main.next{background:#4a9eff0f;border-radius:9px;padding:9px;margin:-2px 0 2px;}
+.step-main.next{background:var(--blue-0f);border-radius:9px;padding:9px;margin:-2px 0 2px;}
 .step-text{flex:1;min-width:0;}
 .step-title{font-size:13px;color:var(--text);word-break:break-word;}
 .step-goal{font-size:9px;color:var(--muted);margin-top:3px;letter-spacing:1px;}
@@ -259,18 +345,18 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 .kind-tag{font-size:10px;opacity:.85}
 .bujo-glyph{display:inline-flex;align-items:center;justify-content:center;
   width:20px;height:20px;flex-shrink:0;border-radius:6px;background:var(--bg);
-  border:1px solid var(--border2);color:#4a9eff;font-size:12px;line-height:1;}
+  border:1px solid var(--border2);color:var(--blue);font-size:12px;line-height:1;}
 .step-actions{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:9px;}
 .step-btn{border:1px solid var(--border2);background:transparent;color:var(--text2);
   border-radius:8px;padding:5px 11px;cursor:pointer;font-size:10px;font-family:inherit;}
-.step-btn.done{border-color:#22d3ee;color:#22d3ee;background:#22d3ee18;}
+.step-btn.done{border-color:var(--cyan);color:var(--cyan);background:var(--cyan-18);}
 .step-select{border:1px solid var(--border2);background:var(--bg2);color:var(--text2);
   border-radius:8px;padding:5px 8px;font-size:10px;font-family:inherit;max-width:150px;}
 .step-hint{font-size:10px;color:var(--muted2);}
 .defer-tag{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:10px;
-  font-size:9px;background:#f9731622;border:1px solid #f9731666;color:#f97316;
+  font-size:9px;background:var(--orange-22);border:1px solid var(--orange-66);color:var(--orange);
   vertical-align:middle;letter-spacing:.5px;}
-.step-btn.drop{border-color:#5a7a9a;color:var(--muted);}
+.step-btn.drop{border-color:var(--border3);color:var(--muted);}
 .review-section{margin-bottom:18px;}
 .review-head{font-family:'Cinzel',serif;font-size:12px;color:var(--text);
   letter-spacing:1px;margin-bottom:4px;}
@@ -278,22 +364,22 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 .inbox-capture{display:flex;gap:6px;margin-bottom:12px;}
 .inbox-capture input{flex:1;min-width:0;background:var(--bg2);border:1px solid var(--border2);
   color:var(--text);border-radius:10px;padding:10px 12px;font-size:12px;font-family:inherit;}
-.inbox-capture input:focus{outline:none;border-color:#4a9eff;}
+.inbox-capture input:focus{outline:none;border-color:var(--blue);}
 .quest-add-fab{position:fixed;bottom:calc(72px + var(--safe-bot) + 14px);right:16px;
   width:48px;height:48px;border-radius:50%;border:none;
-  background:linear-gradient(135deg,#4a9eff,#a855f7);
-  color:#fff;font-size:24px;cursor:pointer;z-index:50;
-  box-shadow:0 4px 20px #4a9eff44;display:flex;align-items:center;justify-content:center;}
+  background:linear-gradient(135deg,var(--blue),var(--purple));
+  color:var(--on-accent);font-size:24px;cursor:pointer;z-index:50;
+  box-shadow:0 4px 20px var(--blue-44);display:flex;align-items:center;justify-content:center;}
 .done-strike{text-decoration:line-through;opacity:.6;}
 
 .reward-skill-list{display:flex;flex-direction:column;gap:6px;margin-bottom:10px;}
 .reward-skill-row{display:flex;align-items:center;gap:8px;background:var(--bg);
   border:1px solid var(--border);border-radius:8px;padding:8px 10px;}
 .reward-skill-name{flex:1;font-size:11px;color:var(--text);}
-.reward-xp-input{width:64px;background:var(--bg2);border:1px solid #f59e0b66;
-  border-radius:6px;padding:4px 6px;color:#f59e0b;font-family:"Cinzel",serif;
+.reward-xp-input{width:64px;background:var(--bg2);border:1px solid var(--amber-66);
+  border-radius:6px;padding:4px 6px;color:var(--amber);font-family:"Cinzel",serif;
   font-size:13px;font-weight:700;outline:none;text-align:center;}
-.reward-del{background:none;border:none;color:#ef444466;cursor:pointer;font-size:14px;padding:2px 4px;}
+.reward-del{background:none;border:none;color:var(--red-66);cursor:pointer;font-size:14px;padding:2px 4px;}
 .skill-search{width:100%;background:var(--bg);border:1px solid var(--border2);
   border-radius:7px;padding:8px 10px;color:var(--text);font-size:12px;
   outline:none;margin-bottom:6px;font-family:"Share Tech Mono",monospace;}
@@ -304,30 +390,30 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 .skill-pick-item:last-child{border-bottom:none;}
 .skill-pick-item:active{background:var(--bg3);}
 .daily-done-badge{display:inline-flex;align-items:center;gap:4px;font-size:9px;
-  color:#10b981;background:#10b98118;border:1px solid #10b98144;
+  color:var(--green);background:var(--green-18);border:1px solid var(--green-44);
   padding:2px 8px;border-radius:4px;margin-left:6px;}
 /* ── 今日頁 ── */
 .today-page{padding-bottom:70px;display:flex;flex-direction:column;gap:10px;}
 .today-card{background:var(--bg2);border:1px solid var(--border);border-radius:14px;
   padding:14px;display:flex;flex-direction:column;gap:8px;}
-.today-card.focus{border-color:#f59e0b55;background:linear-gradient(180deg,#1a140022,var(--bg2));}
+.today-card.focus{border-color:var(--amber-55);background:linear-gradient(180deg,var(--focus-wash),var(--bg2));}
 .today-date{font-family:'Cinzel',serif;font-size:18px;color:var(--text);letter-spacing:1px;}
-.today-shift{font-size:13px;color:#4a9eff;}
+.today-shift{font-size:13px;color:var(--blue);}
 .today-line{font-size:14px;color:var(--text);line-height:1.6;}
-.today-streak{font-size:15px;color:#f59e0b;line-height:1.6;}
+.today-streak{font-size:15px;color:var(--amber);line-height:1.6;}
 .today-muted{font-size:12px;color:var(--muted);line-height:1.6;}
 .today-label{font-size:12px;color:var(--muted);letter-spacing:2px;}
-.today-goal{font-size:13px;color:#4a9eff;}
+.today-goal{font-size:13px;color:var(--blue);}
 .today-step{font-size:18px;color:var(--text);line-height:1.5;}
-.today-done{font-size:13px;color:#10b981;background:#10b98112;border:1px solid #10b98144;
+.today-done{font-size:13px;color:var(--green);background:var(--green-12);border:1px solid var(--green-44);
   border-radius:8px;padding:8px;}
 .today-check{font-size:13px;color:var(--text);background:var(--bg3);border-radius:8px;padding:8px;}
 .today-row{display:flex;flex-wrap:wrap;gap:8px;}
 .today-btn{min-height:48px;padding:12px 14px;border-radius:10px;cursor:pointer;
   font-size:14px;font-family:'Share Tech Mono',monospace;flex:1 1 auto;
   background:var(--bg3);border:1px solid var(--border2);color:var(--text);}
-.today-btn.on{background:#4a9eff22;border-color:#4a9eff;color:#4a9eff;}
-.today-btn.primary{background:#f59e0b22;border-color:#f59e0b;color:#f59e0b;}
+.today-btn.on{background:var(--blue-22);border-color:var(--blue);color:var(--blue);}
+.today-btn.primary{background:var(--amber-22);border-color:var(--amber);color:var(--amber);}
 .today-btn.ghost{background:transparent;color:var(--muted);}
 .today-btn[disabled]{opacity:.45;cursor:not-allowed;}
 .today-fold{background:none;border:none;color:var(--muted);font-size:13px;cursor:pointer;
@@ -340,8 +426,8 @@ textarea.today-input{min-height:72px;resize:vertical;}
 .today-cell{display:flex;flex-direction:column;gap:4px;min-height:56px;padding:8px 6px;
   border-radius:8px;cursor:pointer;background:var(--bg);border:1px solid var(--border);
   color:var(--text);font-family:'Share Tech Mono',monospace;text-align:left;}
-.today-cell.is-today{border-color:#f59e0b;}
-.today-cell.is-actual{background:#4a9eff12;}
+.today-cell.is-today{border-color:var(--amber);}
+.today-cell.is-actual{background:var(--blue-12);}
 .today-cell.is-future{color:var(--muted);}
 .today-cell-date{font-size:12px;color:var(--muted);}
 .today-cell-text{font-size:13px;}
@@ -353,11 +439,11 @@ textarea.today-input{min-height:72px;resize:vertical;}
 .today-check-row{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--text);
   min-height:48px;cursor:pointer;}
 .today-check-row input{width:22px;height:22px;}
-.today-err{font-size:13px;color:#ef4444;}
+.today-err{font-size:13px;color:var(--red);}
 .today-notice{font-size:13px;line-height:1.6;}
-.today-notice.ok{color:#10b981;background:#10b98112;border:1px solid #10b98144;
+.today-notice.ok{color:var(--green);background:var(--green-12);border:1px solid var(--green-44);
   border-radius:8px;padding:10px;}
-.today-notice.error{color:#ef4444;background:#ef444412;border:1px solid #ef444444;
+.today-notice.error{color:var(--red);background:var(--red-12);border:1px solid var(--red-44);
   border-radius:8px;padding:10px;}
 @media (max-width:340px){
   .today-week{grid-template-columns:repeat(2,1fr);}
@@ -486,7 +572,7 @@ function svgRing(xp,color,size=56){
   const {lv,pct}=lvProgress(xp);
   const dash=circ*(lv>=maxLv()?1:pct/100);
   return `<svg width="${size}" height="${size}">
-    <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="#1e3a4a" stroke-width="4"/>
+    <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="var(--border)" stroke-width="4"/>
     <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="${col}" stroke-width="4"
       stroke-dasharray="${dash} ${circ}" stroke-linecap="round"
       transform="rotate(-90 ${size/2} ${size/2})"
@@ -520,9 +606,9 @@ function leaveToday(where){
 function questViewTabs(){
   const btn=(v,label)=>`<button onclick="switchQuestView('${v}')"
     style="flex:1;min-height:48px;padding:10px;border-radius:8px;cursor:pointer;font-size:13px;
-    background:${questView===v?"#4a9eff22":"var(--bg)"};
-    border:1px solid ${questView===v?"#4a9eff":"var(--border2)"};
-    color:${questView===v?"#4a9eff":"var(--muted)"}">${label}</button>`;
+    background:${questView===v?"var(--blue-22)":"var(--bg)"};
+    border:1px solid ${questView===v?"var(--blue)":"var(--border2)"};
+    color:${questView===v?"var(--blue)":"var(--muted)"}">${label}</button>`;
   return `<div style="display:flex;gap:8px;margin-bottom:12px">
     ${btn("today","☀️ 今日")}${btn("all","📜 全部任務")}</div>`;
 }
@@ -531,9 +617,9 @@ function switchStatsSub(v){statsSub=v;render();}
 function statsSubTabs(){
   const btn=(v,label)=>`<button onclick="switchStatsSub('${v}')"
     style="flex:1;padding:8px;border-radius:8px;cursor:pointer;font-size:11px;
-    background:${statsSub===v?"#4a9eff22":"var(--bg)"};
-    border:1px solid ${statsSub===v?"#4a9eff":"var(--border2)"};
-    color:${statsSub===v?"#4a9eff":"var(--muted)"}">${label}</button>`;
+    background:${statsSub===v?"var(--blue-22)":"var(--bg)"};
+    border:1px solid ${statsSub===v?"var(--blue)":"var(--border2)"};
+    color:${statsSub===v?"var(--blue)":"var(--muted)"}">${label}</button>`;
   return `<div style="display:flex;gap:8px;margin-bottom:12px">
     ${btn("grow","📊 成長")}${btn("ach","🏅 成就")}${btn("review","🔁 回顧")}</div>`;
 }
@@ -568,11 +654,11 @@ function render(){
     }
   }catch(err){
     console.error("Render error:",err);
-    el.innerHTML=`<div style="padding:30px;color:#ef4444;font-size:12px;font-family:monospace">
+    el.innerHTML=`<div style="padding:30px;color:var(--red);font-size:12px;font-family:monospace">
       <div style="margin-bottom:10px;font-size:16px">⚠️ 載入錯誤</div>
-      <div style="color:#5a7a9a">${err.message}</div>
+      <div style="color:var(--border3)">${err.message}</div>
       <button onclick="currentTab='skills';detailCore=null;render()" style="margin-top:16px;
-        background:#4a9eff22;border:1px solid #4a9eff;color:#4a9eff;border-radius:8px;
+        background:var(--blue-22);border:1px solid var(--blue);color:var(--blue);border-radius:8px;
         padding:10px 20px;cursor:pointer;font-size:12px">← 返回首頁</button>
     </div>`;
   }
@@ -586,7 +672,7 @@ function render(){
 function renderCoreList(){
   const addBtn=`<div style="margin-bottom:10px">
     <button onclick="openAddCore()"
-      style="width:100%;background:#4a9eff18;border:1px dashed #4a9eff55;color:#4a9eff;
+      style="width:100%;background:var(--blue-18);border:1px dashed var(--blue-55);color:var(--blue);
       border-radius:14px;padding:12px;cursor:pointer;font-size:11px;font-family:'Cinzel',serif;letter-spacing:1px">
       ✦ 新增核心技能
     </button></div>`;
@@ -644,7 +730,7 @@ function renderDetail(coreId){
   const {lv,pct,cur,need}=lvProgress(xp);
   const subs=state.subSkills.filter(s=>s.coreId===coreId);
   const dots=[1,2,3,4,5,6,7,8,9].map(i=>
-    `<div class="lv-dot" style="width:${i<=lv?9:7}px;height:${i<=lv?9:7}px;background:${i<=lv?col:"#1e3a4a"};${i<=lv?`box-shadow:0 0 5px ${col}`:""}" title="Lv${i}"></div>`
+    `<div class="lv-dot" style="width:${i<=lv?9:7}px;height:${i<=lv?9:7}px;background:${i<=lv?col:"var(--border)"};${i<=lv?`box-shadow:0 0 5px ${col}`:""}" title="Lv${i}"></div>`
   ).join("");
 
   // 承接技能「歷練」：沒有指定技能的行動累積在這裡（§4.3）。它是系統產生的
@@ -667,7 +753,7 @@ function renderDetail(coreId){
   const subCards=subs.length===0
     ?`<div class="empty-state">尚未加入子技能<br><small>每個子技能的 EXP 都會累計到此核心技能</small></div>`
     :subs.map(s=>{
-      const tc=s.type==="active"?"#f59e0b":"#22d3ee";
+      const tc=s.type==="active"?"var(--amber)":"var(--cyan)";
       const ti=s.type==="active"?"⚡":"🛡️";
       const tl=s.type==="active"?"主動":"被動";
       const subLv=Math.min(calcLv(s.xp),SUB_MAX_LV);
@@ -703,7 +789,7 @@ function renderDetail(coreId){
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <button class="back-btn" style="margin-bottom:0" onclick="detailCore=null;render()">← 返回</button>
       <button onclick="deleteCore('${coreId}')"
-        style="background:#1a0808;border:1px solid #ef444455;color:#ef4444;
+        style="background:var(--danger-bg);border:1px solid var(--red-55);color:var(--red);
         border-radius:8px;padding:6px 12px;cursor:pointer;font-size:11px">
         🗑 刪除核心技能
       </button>
@@ -738,7 +824,7 @@ function renderDetail(coreId){
     <div class="section-hd">
       <span class="section-hd-title">子技能 (${subs.length})</span>
       <div style="display:flex;gap:6px">
-        ${subs.length>=2?`<button class="btn-add" style="color:#a855f7;background:#a855f718;border:1px solid #a855f755"
+        ${subs.length>=2?`<button class="btn-add" style="color:var(--purple);background:var(--purple-18);border:1px solid var(--purple-55)"
           onclick="openMergeSub('${coreId}')">⚗ 合併</button>`:""}
         <button class="btn-add" style="color:${col};background:${col}18;border:1px solid ${col}55"
           onclick="openAddSub('${coreId}')">+ 新增</button>
@@ -764,12 +850,12 @@ function renderStats(){
 
   const overview=`<div class="stat-block">
     <div class="stat-block-title">◆ 總覽</div>
-    <div class="stat-row"><span class="stat-lbl">總等級</span><span class="stat-val" style="color:#f59e0b">★ ${totalLv}</span></div>
-    <div class="stat-row"><span class="stat-lbl">總 EXP</span><span class="stat-val" style="color:#22d3ee">${totalXP}</span></div>
-    <div class="stat-row"><span class="stat-lbl">子技能數量</span><span class="stat-val" style="color:#a855f7">${state.subSkills.length}</span></div>
-    <div class="stat-row"><span class="stat-lbl">⚡ 主動技能</span><span class="stat-val" style="color:#f59e0b">${activeCnt}</span></div>
-    <div class="stat-row"><span class="stat-lbl">🛡️ 被動技能</span><span class="stat-val" style="color:#22d3ee">${passiveCnt}</span></div>
-    <div class="stat-row"><span class="stat-lbl">📝 知識筆記</span><span class="stat-val" style="color:#ec4899">${notesCnt}</span></div>
+    <div class="stat-row"><span class="stat-lbl">總等級</span><span class="stat-val" style="color:var(--amber)">★ ${totalLv}</span></div>
+    <div class="stat-row"><span class="stat-lbl">總 EXP</span><span class="stat-val" style="color:var(--cyan)">${totalXP}</span></div>
+    <div class="stat-row"><span class="stat-lbl">子技能數量</span><span class="stat-val" style="color:var(--purple)">${state.subSkills.length}</span></div>
+    <div class="stat-row"><span class="stat-lbl">⚡ 主動技能</span><span class="stat-val" style="color:var(--amber)">${activeCnt}</span></div>
+    <div class="stat-row"><span class="stat-lbl">🛡️ 被動技能</span><span class="stat-val" style="color:var(--cyan)">${passiveCnt}</span></div>
+    <div class="stat-row"><span class="stat-lbl">📝 知識筆記</span><span class="stat-val" style="color:var(--pink)">${notesCnt}</span></div>
   </div>`;
 
   const ranking=`<div class="stat-block">
@@ -794,17 +880,17 @@ function charCard(){
   const G=window.Goals;
   const totalXP=G.listSkills().reduce((a,s)=>a+(s.xp||0),0);
   const cells=[
-    ["總等級", "★ "+G.totalLevel(), "#f59e0b"],
-    ["總 EXP", totalXP, "#22d3ee"],
-    ["連續天數", G.globalStreak()+" 天", "#ef4444"],
-    ["成就", G.unlockedAchievements().length+" / "+G.ACHIEVEMENTS.length, "#a855f7"],
+    ["總等級", "★ "+G.totalLevel(), "var(--amber)"],
+    ["總 EXP", totalXP, "var(--cyan)"],
+    ["連續天數", G.globalStreak()+" 天", "var(--red)"],
+    ["成就", G.unlockedAchievements().length+" / "+G.ACHIEVEMENTS.length, "var(--purple)"],
   ];
   return `<div class="stat-block" style="text-align:center">
     <div class="stat-block-title" style="text-align:left">◆ 角色卡</div>
     <div style="font-family:'Cinzel',serif;font-size:17px;color:var(--text);margin:2px 0 3px">
       ${esc(state.charName)}
     </div>
-    <div style="font-size:11px;color:#f59e0b;letter-spacing:1px;margin-bottom:12px">
+    <div style="font-size:11px;color:var(--amber);letter-spacing:1px;margin-bottom:12px">
       ${esc(G.charTitle())}
     </div>
     <div style="display:flex;gap:6px">
@@ -857,11 +943,11 @@ function radarSvg(levels){
   const pt=(i,r)=>[c+r*Math.cos(ang(i)), c+r*Math.sin(ang(i))];
   const poly=r=>levels.map((_,i)=>pt(i,r).map(v=>v.toFixed(1)).join(",")).join(" ");
   const grid=[0.25,0.5,0.75,1].map(f=>
-    `<polygon points="${poly(R*f)}" fill="none" stroke="#1e3a4a" stroke-width="1"/>`).join("");
+    `<polygon points="${poly(R*f)}" fill="none" stroke="var(--border)" stroke-width="1"/>`).join("");
   const spokes=levels.map((_,i)=>{
     const [x,y]=pt(i,R);
     return `<line x1="${c}" y1="${c}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}"
-      stroke="#1e3a4a" stroke-width="1"/>`;
+      stroke="var(--border)" stroke-width="1"/>`;
   }).join("");
   const shape=levels.map((l,i)=>
     pt(i,R*(MIN+(1-MIN)*(l.lv/max))).map(v=>v.toFixed(1)).join(",")).join(" ");
@@ -882,7 +968,7 @@ function radarSvg(levels){
   return `<div style="display:flex;justify-content:center">
     <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="max-width:100%">
       ${grid}${spokes}
-      <polygon points="${shape}" fill="#4a9eff33" stroke="#4a9eff" stroke-width="2"/>
+      <polygon points="${shape}" fill="var(--blue-33)" stroke="var(--blue)" stroke-width="2"/>
       ${dots}${labels}
     </svg>
   </div>`;
@@ -929,7 +1015,7 @@ function renderReview(){
         <span class="stat-val" style="color:${cssColor(c.core.color)}">+${c.gain}</span>
       </div>`).join("");
 
-  const ups=r.levelUps.length===0?"":`<div style="margin-top:8px;font-size:10px;color:#f59e0b">
+  const ups=r.levelUps.length===0?"":`<div style="margin-top:8px;font-size:10px;color:var(--amber)">
     ${r.levelUps.map(u=>`⬆ ${esc(u.core.name)} Lv${u.from} → Lv${u.to}`).join("　")}</div>`;
 
   const result=`<div class="stat-block">
@@ -937,9 +1023,9 @@ function renderReview(){
     <div style="font-size:9px;color:var(--muted2);margin-bottom:8px">
       ${esc(r.from)} ～ ${esc(r.to)}（週一起算，日界凌晨 4:00）
     </div>
-    ${row("獲得 EXP","+"+r.xp,"#22d3ee")}
-    ${row("完成步驟",r.steps+" 項","#f59e0b")}
-    ${row("最長連續",r.bestStreak+" 天","#ef4444")}
+    ${row("獲得 EXP","+"+r.xp,"var(--cyan)")}
+    ${row("完成步驟",r.steps+" 項","var(--amber)")}
+    ${row("最長連續",r.bestStreak+" 天","var(--red)")}
     <div style="height:8px"></div>
     ${gains}${ups}
   </div>`;
@@ -967,7 +1053,7 @@ function renderReview(){
       ?`<div style="font-size:10px;color:var(--muted2)">沒有待歸屬的 EXP</div>`
       :un.map(e=>`<div class="stat-row">
           <span class="stat-lbl">${esc(e.date)}</span>
-          <span class="stat-val" style="color:#a855f7">${e.xp} EXP</span>
+          <span class="stat-val" style="color:var(--purple)">${e.xp} EXP</span>
         </div>`).join("")
       +`<div style="font-size:9px;color:var(--muted2);margin-top:6px">
           這些是遷移、刪除核心或匯入帶進來的，指定核心之後就會計入該核心。
@@ -995,17 +1081,17 @@ function showDailySummary(){
   overlay.innerHTML=`
     <div class="modal-sheet">
       <div class="modal-handle"></div>
-      <div class="modal-title" style="color:#4a9eff">◆ 昨日結算 ◆</div>
+      <div class="modal-title" style="color:var(--blue)">◆ 昨日結算 ◆</div>
       <div style="text-align:center;font-size:9px;color:var(--muted2);margin-bottom:12px">
         ${esc(s.day)}
       </div>
-      ${line("完成項目",s.steps+" 項","#f59e0b")}
-      ${line("獲得 EXP","+"+s.xp,"#22d3ee")}
-      ${s.streaks.map(t=>line(esc(t.title),t.streak+" 天連續","#ef4444")).join("")}
+      ${line("完成項目",s.steps+" 項","var(--amber)")}
+      ${line("獲得 EXP","+"+s.xp,"var(--cyan)")}
+      ${s.streaks.map(t=>line(esc(t.title),t.streak+" 天連續","var(--red)")).join("")}
       ${s.levelUps.map(u=>line(esc(u.core.name),`Lv${u.from} → Lv${u.to}`,
         cssColor(u.core.color))).join("")}
       <div class="modal-actions">
-        <button class="btn-save" style="background:#4a9eff22;border:1px solid #4a9eff77;color:#4a9eff"
+        <button class="btn-save" style="background:var(--blue-22);border:1px solid var(--blue-77);color:var(--blue)"
           onclick="closeDailySummary()">知道了</button>
       </div>
     </div>`;
@@ -1029,6 +1115,20 @@ function flushUnlocks(){
 }
 
 // ── Profile ───────────────────────────────────────────────────────────────────
+// 外觀主題。值與順序對齊 model.THEME，多一個顯示用的標籤與圖示。
+const THEME_CHOICES=[
+  {k:"auto",  icon:"🌓", label:"跟隨系統"},
+  {k:"light", icon:"☀️", label:"淺色"},
+  {k:"dark",  icon:"🌙", label:"深色"},
+];
+function themePref(){return window.Goals.themePref();}
+function setTheme(pref){
+  const out=window.Goals.setTheme(pref);
+  if(!out.ok){showToast("⚠ 主題沒能保存",2500);return;}
+  render();
+  showToast("✓ 已儲存");
+}
+
 function renderProfile(){
   return `
     <div class="stat-block">
@@ -1037,9 +1137,19 @@ function renderProfile(){
         <label class="form-label">角色名稱</label>
         <div style="display:flex;gap:8px">
           <input class="form-input" style="margin-bottom:0;flex:1" id="name-input" value="${esc(state.charName)}" placeholder="輸入名稱"/>
-          <button onclick="saveName()" style="background:#4a9eff22;border:1px solid #4a9eff66;color:#4a9eff;border-radius:8px;padding:10px 14px;cursor:pointer;font-size:12px">儲存</button>
+          <button onclick="saveName()" style="background:var(--blue-22);border:1px solid var(--blue-66);color:var(--blue);border-radius:8px;padding:10px 14px;cursor:pointer;font-size:12px">儲存</button>
         </div>
       </div>
+    </div>
+    <div class="stat-block">
+      <div class="stat-block-title">◆ 外觀</div>
+      <div class="type-toggle" id="theme-toggle">
+        ${THEME_CHOICES.map(t=>`
+          <button class="type-btn" data-theme-choice="${t.k}" onclick="setTheme('${t.k}')"
+            style="${themePref()===t.k?"background:var(--blue-22);border-color:var(--blue);color:var(--blue)":""}"
+            >${t.icon} ${t.label}</button>`).join("")}
+      </div>
+      <div class="step-hint">「跟隨系統」會照裝置的淺色／深色設定切換。</div>
     </div>
     <div class="stat-block">
       <div class="stat-block-title">◆ 升級門檻參考</div>
@@ -1087,7 +1197,7 @@ function renderReminderPanel(){
   }else if(st.permission==="denied"){
     action=`<div class="stat-row"><span class="stat-lbl" style="color:var(--muted2)">通知已被瀏覽器封鎖，需到瀏覽器設定解除</span></div>`;
   }else{
-    action=`<button onclick="toggleReminders()" style="width:100%;background:${st.enabled?"#22d3ee18":"var(--bg)"};border:1px solid ${st.enabled?"#22d3ee":"var(--border2)"};color:${st.enabled?"#22d3ee":"var(--text)"};border-radius:8px;padding:11px;cursor:pointer;font-size:12px">${st.enabled?"✓ 已開啟到期通知":"開啟到期通知"}</button>`;
+    action=`<button onclick="toggleReminders()" style="width:100%;background:${st.enabled?"var(--cyan-18)":"var(--bg)"};border:1px solid ${st.enabled?"var(--cyan)":"var(--border2)"};color:${st.enabled?"var(--cyan)":"var(--text)"};border-radius:8px;padding:11px;cursor:pointer;font-size:12px">${st.enabled?"✓ 已開啟到期通知":"開啟到期通知"}</button>`;
   }
 
   return rows+action+`<div style="font-size:10px;color:var(--muted2);margin-top:8px;line-height:1.6">
@@ -1189,7 +1299,7 @@ function openMergeSub(coreId){
   overlay.innerHTML=`
     <div class="modal-box" style="max-height:90vh;overflow-y:auto">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
-        <div class="modal-title" style="color:#a855f7;margin:0">⚗ 合併技能</div>
+        <div class="modal-title" style="color:var(--purple);margin:0">⚗ 合併技能</div>
         <button onclick="closeMergeModal()" style="background:var(--bg);border:1px solid var(--border2);
           color:var(--muted);width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:16px;
           flex-shrink:0;display:flex;align-items:center;justify-content:center">✕</button>
@@ -1200,9 +1310,9 @@ function openMergeSub(coreId){
         ${subs.map(s=>`
           <label style="display:flex;align-items:center;gap:8px;padding:8px 10px;
             background:var(--bg);border:1px solid var(--border2);border-radius:8px;cursor:pointer">
-            <input type="checkbox" value="${esc(s.id)}" style="accent-color:#a855f7;width:16px;height:16px"/>
+            <input type="checkbox" value="${esc(s.id)}" style="accent-color:var(--purple);width:16px;height:16px"/>
             <span style="font-size:13px">${esc(s.icon||"⭐")} ${esc(s.name)}</span>
-            <span style="margin-left:auto;font-size:10px;color:#a855f7;font-family:'Cinzel',serif">EXP ${s.xp||0}</span>
+            <span style="margin-left:auto;font-size:10px;color:var(--purple);font-family:'Cinzel',serif">EXP ${s.xp||0}</span>
           </label>`).join("")}
       </div>
 
@@ -1219,7 +1329,7 @@ function openMergeSub(coreId){
       <div style="display:flex;gap:8px;margin-bottom:14px">
         <button id="mbtn-active" onclick="setMergeType('active')"
           style="flex:1;padding:8px;border-radius:8px;cursor:pointer;font-size:11px;
-          background:#f59e0b22;border:1px solid #f59e0b;color:#f59e0b">⚡ 主動</button>
+          background:var(--amber-22);border:1px solid var(--amber);color:var(--amber)">⚡ 主動</button>
         <button id="mbtn-passive" onclick="setMergeType('passive')"
           style="flex:1;padding:8px;border-radius:8px;cursor:pointer;font-size:11px;
           background:var(--bg);border:1px solid var(--border2);color:var(--muted)">🛡️ 被動</button>
@@ -1237,13 +1347,13 @@ function openMergeSub(coreId){
           </button>`).join("")}
       </div>
 
-      <div id="merge-preview" style="display:none;padding:10px;background:#a855f711;
-        border:1px solid #a855f733;border-radius:8px;margin-bottom:14px;font-size:11px;color:#a855f7"></div>
+      <div id="merge-preview" style="display:none;padding:10px;background:var(--purple-11);
+        border:1px solid var(--purple-33);border-radius:8px;margin-bottom:14px;font-size:11px;color:var(--purple)"></div>
 
       <div class="modal-actions">
         <button onclick="confirmMerge('${coreId}')"
-          style="flex:1;padding:12px;background:#a855f722;border:1px solid #a855f777;
-          color:#a855f7;border-radius:10px;cursor:pointer;font-size:13px;
+          style="flex:1;padding:12px;background:var(--purple-22);border:1px solid var(--purple-77);
+          color:var(--purple);border-radius:10px;cursor:pointer;font-size:13px;
           font-family:'Share Tech Mono',monospace">⚗ 確認合併</button>
         <button onclick="closeMergeModal()"
           style="flex:1;padding:12px;background:var(--bg);border:1px solid var(--border2);
@@ -1266,10 +1376,10 @@ function setMergeType(t){
   window._mergeType=t;
   const ac=t==="active";
   document.getElementById("mbtn-active").style.cssText=ac
-    ?"flex:1;padding:8px;border-radius:8px;cursor:pointer;font-size:11px;background:#f59e0b22;border:1px solid #f59e0b;color:#f59e0b"
+    ?"flex:1;padding:8px;border-radius:8px;cursor:pointer;font-size:11px;background:var(--amber-22);border:1px solid var(--amber);color:var(--amber)"
     :"flex:1;padding:8px;border-radius:8px;cursor:pointer;font-size:11px;background:var(--bg);border:1px solid var(--border2);color:var(--muted)";
   document.getElementById("mbtn-passive").style.cssText=!ac
-    ?"flex:1;padding:8px;border-radius:8px;cursor:pointer;font-size:11px;background:#22d3ee22;border:1px solid #22d3ee;color:#22d3ee"
+    ?"flex:1;padding:8px;border-radius:8px;cursor:pointer;font-size:11px;background:var(--cyan-22);border:1px solid var(--cyan);color:var(--cyan)"
     :"flex:1;padding:8px;border-radius:8px;cursor:pointer;font-size:11px;background:var(--bg);border:1px solid var(--border2);color:var(--muted)";
 }
 
@@ -1279,9 +1389,10 @@ function setMergeCore(coreId){
     const btn=document.getElementById(`mcore-${c.id}`);
     if(!btn)return;
     if(c.id===coreId){
-      btn.style.background=c.color+"22";
-      btn.style.borderColor=c.color;
-      btn.style.color=c.color;
+      const cc=cssColor(c.color);
+      btn.style.background=cc+"22";
+      btn.style.borderColor=cc;
+      btn.style.color=cc;
     }else{
       btn.style.background="var(--bg)";
       btn.style.borderColor="var(--border2)";
@@ -1415,8 +1526,8 @@ function renderModal(){
 
       <label class="form-label">技能類型</label>
       <div class="type-toggle">
-        <button class="type-btn" id="btn-active" style="${d.type==="active"?`background:#f59e0b22;border-color:#f59e0b;color:#f59e0b`:""}" onclick="setType('active')">⚡ 主動技能</button>
-        <button class="type-btn" id="btn-passive" style="${d.type==="passive"?`background:#22d3ee22;border-color:#22d3ee;color:#22d3ee`:""}" onclick="setType('passive')">🛡️ 被動技能</button>
+        <button class="type-btn" id="btn-active" style="${d.type==="active"?`background:var(--amber-22);border-color:var(--amber);color:var(--amber)`:""}" onclick="setType('active')">⚡ 主動技能</button>
+        <button class="type-btn" id="btn-passive" style="${d.type==="passive"?`background:var(--cyan-22);border-color:var(--cyan);color:var(--cyan)`:""}" onclick="setType('passive')">🛡️ 被動技能</button>
       </div>
 
       <label class="form-label">子技能名稱 *</label>
@@ -1469,8 +1580,8 @@ function setType(t){
   if(!modalData)return;
   modalData.data.type=t;
   const ac=t==="active";
-  document.getElementById("btn-active").style.cssText=ac?"background:#f59e0b22;border-color:#f59e0b;color:#f59e0b":"";
-  document.getElementById("btn-passive").style.cssText=!ac?"background:#22d3ee22;border-color:#22d3ee;color:#22d3ee":"";
+  document.getElementById("btn-active").style.cssText=ac?"background:var(--amber-22);border-color:var(--amber);color:var(--amber)":"";
+  document.getElementById("btn-passive").style.cssText=!ac?"background:var(--cyan-22);border-color:var(--cyan);color:var(--cyan)":"";
 }
 function addXP(v){
   const el=document.getElementById("m-xp");
@@ -1574,7 +1685,7 @@ function openAddCore(){
   overlay.innerHTML=`
     <div class="modal-sheet">
       <div class="modal-handle"></div>
-      <div class="modal-title" style="color:#4a9eff">◆ 新增核心技能 ◆</div>
+      <div class="modal-title" style="color:var(--blue)">◆ 新增核心技能 ◆</div>
       <label class="form-label">自訂名稱（例：預知眼）*</label>
       <input class="form-input" id="nc-title" placeholder="你的核心技能名稱"/>
       <label class="form-label">類別備注（例：時間管理）</label>
@@ -1588,7 +1699,7 @@ function openAddCore(){
           border:2px solid ${i===0?'white':col+'44'};transition:all .2s"></div>`).join("")}
       </div>
       <div class="modal-actions">
-        <button class="btn-save" style="background:#4a9eff22;border:1px solid #4a9eff77;color:#4a9eff"
+        <button class="btn-save" style="background:var(--blue-22);border:1px solid var(--blue-77);color:var(--blue)"
           onclick="saveNewCore()">✦ 新增</button>
       </div>
     </div>`;
@@ -1695,7 +1806,8 @@ function esc(v){return window.Goals.esc(v);}
 
 // 顏色進的是 inline style，HTML 跳脫擋不住 CSS 的分隔字元（`;` `:` `(`）：
 // `esc()` 之後仍然可以塞進整串宣告。收斂成十六進位色碼，與 model 同一個判定。
-function cssColor(v){return window.Goals.color(v);}
+// 淺色主題下還要把資料色壓暗，否則深色主題挑的飽和色在淺底上看不見。
+function cssColor(v){return window.Goals.themeColor(v);}
 
 function stepMeta(s){return KIND_META[s.kind]||KIND_META.side;}
 function isActionableStep(s){return !s.archived&&ACTIONABLE_STATES.has(s.state);}
@@ -1758,7 +1870,7 @@ function renderQuests(){
     {k:"done",    label:`✓ 完成 (${counts.done})`},
     {k:"archive", label:`📦 封存 (${counts.archive})`},
   ].map(t=>`<button class="qtab ${questFilter===t.k?"active":""}"
-    style="${questFilter===t.k?`background:${t.k==="archive"?"#f59e0b":t.k==="done"?"#22d3ee":"#4a9eff"}22;border-color:${t.k==="archive"?"#f59e0b":t.k==="done"?"#22d3ee":"#4a9eff"};color:${t.k==="archive"?"#f59e0b":t.k==="done"?"#22d3ee":"#4a9eff"}`:""}"
+    style="${questFilter===t.k?`background:${t.k==="archive"?"var(--amber)":t.k==="done"?"var(--cyan)":"var(--blue)"}22;border-color:${t.k==="archive"?"var(--amber)":t.k==="done"?"var(--cyan)":"var(--blue)"};color:${t.k==="archive"?"var(--amber)":t.k==="done"?"var(--cyan)":"var(--blue)"}`:""}"
     onclick="questFilter='${t.k}';render()">${t.label}</button>`).join("");
 
   let cards="";
@@ -1780,9 +1892,9 @@ function renderQuests(){
       if(monthKey!==lastMonthKey){
         lastMonthKey=monthKey;
         divider=`<div style="display:flex;align-items:center;gap:8px;margin:16px 0 10px">
-          <div style="flex:1;height:1px;background:linear-gradient(90deg,#f59e0b44,transparent)"></div>
-          <span style="font-size:10px;color:#f59e0b;letter-spacing:2px;white-space:nowrap">📦 ${monthLabel}</span>
-          <div style="flex:1;height:1px;background:linear-gradient(90deg,transparent,#f59e0b44)"></div>
+          <div style="flex:1;height:1px;background:linear-gradient(90deg,var(--amber-44),transparent)"></div>
+          <span style="font-size:10px;color:var(--amber);letter-spacing:2px;white-space:nowrap">📦 ${monthLabel}</span>
+          <div style="flex:1;height:1px;background:linear-gradient(90deg,transparent,var(--amber-44))"></div>
         </div>`;
       }
       return divider+renderQuestCard(s,today);
@@ -1807,19 +1919,19 @@ function renderQuests(){
   const clearBtn=questFilter==="done"&&counts.done>0
     ?`<div style="display:flex;gap:6px;margin-bottom:10px">
         <button onclick="archiveAllDone()"
-          style="flex:1;background:#1a1000;border:1px solid #f59e0b55;color:#f59e0b;
+          style="flex:1;background:var(--warn-bg);border:1px solid var(--amber-55);color:var(--amber);
           border-radius:8px;padding:9px;cursor:pointer;font-size:11px;font-family:'Share Tech Mono',monospace">
           📦 全部封存 (${counts.done})
         </button>
         <button onclick="clearDoneQuests()"
-          style="flex:1;background:#1a0808;border:1px solid #ef444455;color:#ef4444;
+          style="flex:1;background:var(--danger-bg);border:1px solid var(--red-55);color:var(--red);
           border-radius:8px;padding:9px;cursor:pointer;font-size:11px;font-family:'Share Tech Mono',monospace">
           🗑 全部清除 (${counts.done})
         </button>
       </div>`
     :questFilter==="archive"&&counts.archive>0
     ?`<button onclick="clearArchived()"
-        style="width:100%;background:#1a0808;border:1px solid #ef444455;color:#ef4444;
+        style="width:100%;background:var(--danger-bg);border:1px solid var(--red-55);color:var(--red);
         border-radius:8px;padding:9px;cursor:pointer;font-size:11px;margin-bottom:10px;font-family:'Share Tech Mono',monospace">
         🗑 清除所有封存 (${counts.archive})
       </button>`
@@ -1836,6 +1948,7 @@ function renderQuests(){
 
 function renderQuestCard(s, today){
   const qt=stepMeta(s);
+  const qc=cssColor(qt.color);
   // 每日任務不進 DONE（§5.1）。遷移進來的舊 daily 或改過 kind 的任務可能還停在
   // DONE，把它當成完成就會少掉打卡按鈕，這條 streak 再也起不來——完成一次
   // markDaily() 就會把它拉回待辦。
@@ -1880,14 +1993,14 @@ function renderQuestCard(s, today){
     :"";
 
   return `<div class="quest-card ${cardDone?"done":""} ${isOverdue?"overdue":""}" onclick="openEditQuest('${s.id}')">
-    <div style="position:absolute;top:0;left:0;width:3px;height:100%;background:${qt.color};border-radius:12px 0 0 12px"></div>
+    <div style="position:absolute;top:0;left:0;width:3px;height:100%;background:${qc};border-radius:12px 0 0 12px"></div>
     <div style="padding-left:6px">
       <div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px">
-        <span class="quest-badge" style="color:${qt.color};background:${qt.color}18;border:1px solid ${qt.color}44">
+        <span class="quest-badge" style="color:${qc};background:${qc}18;border:1px solid ${qc}44">
           ${qt.icon} ${qt.label}
         </span>
         ${isDailyDone?'<span class="daily-done-badge">✓ 今日已完成</span>':""}
-        ${isDone?'<span style="font-size:9px;color:#10b981;margin-left:2px">✓ 已完成</span>':""}
+        ${isDone?'<span style="font-size:9px;color:var(--green);margin-left:2px">✓ 已完成</span>':""}
         ${dailyMeta}
         ${goalLabel}
         ${createdLabel}
@@ -1900,25 +2013,25 @@ function renderQuestCard(s, today){
           ${dueHtml}
           ${s.due&&!isDone&&!s.archived?`<button
             onclick="event.stopPropagation();downloadICS('${s.id}')"
-            style="align-self:flex-start;margin-top:3px;background:#a855f718;border:1px solid #a855f755;
-            color:#a855f7;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:9px;
+            style="align-self:flex-start;margin-top:3px;background:var(--purple-18);border:1px solid var(--purple-55);
+            color:var(--purple);border-radius:6px;padding:3px 8px;cursor:pointer;font-size:9px;
             font-family:'Share Tech Mono',monospace">📅 加入日曆</button>`:""}
           ${s.kind==="daily"&&!s.archived?`<button
             onclick="event.stopPropagation();backfillDaily('${s.id}')"
-            style="align-self:flex-start;margin-top:3px;background:#10b98118;border:1px solid #10b98155;
-            color:#10b981;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:9px;
+            style="align-self:flex-start;margin-top:3px;background:var(--green-18);border:1px solid var(--green-55);
+            color:var(--green);border-radius:6px;padding:3px 8px;cursor:pointer;font-size:9px;
             font-family:'Share Tech Mono',monospace">⏪ 補登</button>`:""}
         </div>
         ${isDone&&!s.archived?`<button class="quest-complete-btn"
-          style="background:#f59e0b18;border:1px solid #f59e0b55;color:#f59e0b"
+          style="background:var(--amber-18);border:1px solid var(--amber-55);color:var(--amber)"
           onclick="event.stopPropagation();archiveQuest('${s.id}')">📦 封存</button>`:""}
         ${s.archived?`<button class="quest-complete-btn"
-          style="background:#22d3ee18;border:1px solid #22d3ee55;color:#22d3ee"
+          style="background:var(--cyan-18);border:1px solid var(--cyan-55);color:var(--cyan)"
           onclick="event.stopPropagation();unarchiveQuest('${s.id}')">↩ 取消封存</button>`:""}
         ${!isDone&&!s.archived?`<button class="quest-complete-btn"
-          style="background:${isDailyDone?"#1e3a4a":qt.color+"22"};
-          border:1px solid ${isDailyDone?"#2a4a6a":qt.color+"66"};
-          color:${isDailyDone?"var(--muted)":qt.color};
+          style="background:${isDailyDone?"var(--border)":qc+"22"};
+          border:1px solid ${isDailyDone?"var(--border2)":qc+"66"};
+          color:${isDailyDone?"var(--muted)":qc};
           opacity:${isDailyDone?0.5:1}"
           onclick="event.stopPropagation();completeQuest('${s.id}')">
           ${isDailyDone?"明日再來":"✓ 完成"}</button>`:""}
@@ -2027,7 +2140,7 @@ function showQuestModal(s){
   overlay.innerHTML=`
     <div class="modal-sheet">
       <div class="modal-handle"></div>
-      <div class="modal-title" style="color:#f59e0b">◆ ${isNew?"新增任務":"編輯任務"} ◆</div>
+      <div class="modal-title" style="color:var(--amber)">◆ ${isNew?"新增任務":"編輯任務"} ◆</div>
 
       <label class="form-label">任務類型</label>
       <div class="type-toggle" style="margin-bottom:14px">
@@ -2061,7 +2174,7 @@ function showQuestModal(s){
           <option value="">選擇需要的子技能…</option>
         </select>
         <button onclick="addRewardSkillFromSelect()"
-          style="background:#f59e0b22;border:1px solid #f59e0b66;color:#f59e0b;
+          style="background:var(--amber-22);border:1px solid var(--amber-66);color:var(--amber);
           border-radius:8px;padding:8px 14px;cursor:pointer;font-size:13px;flex-shrink:0">+</button>
       </div>
       <div style="display:flex;gap:6px;margin-bottom:6px">
@@ -2070,7 +2183,7 @@ function showQuestModal(s){
           ${window.Goals.listCores().map(c=>`<option value="${esc(c.id)}">${esc(c.icon)} ${esc(c.title||c.name)}</option>`).join("")}
         </select>
         <button onclick="addRewardCoreFromSelect()"
-          style="background:#22d3ee22;border:1px solid #22d3ee66;color:#22d3ee;
+          style="background:var(--cyan-22);border:1px solid var(--cyan-66);color:var(--cyan);
           border-radius:8px;padding:8px 14px;cursor:pointer;font-size:13px;flex-shrink:0">+</button>
       </div>
       <div style="font-size:9px;color:var(--muted2);margin-bottom:14px">
@@ -2078,7 +2191,7 @@ function showQuestModal(s){
       </div>
 
       <div class="modal-actions">
-        <button class="btn-save" style="background:#f59e0b22;border:1px solid #f59e0b77;color:#f59e0b"
+        <button class="btn-save" style="background:var(--amber-22);border:1px solid var(--amber-77);color:var(--amber)"
           onclick="saveQuest()">
           ${isNew?"✦ 新增任務":"儲存"}
         </button>
@@ -2103,9 +2216,9 @@ function renderRewardList(){
       const xpBtns=[10,25,50,100].map(v=>{
         const active=(r.xp||50)===v;
         return '<button onclick="event.stopPropagation();_modalRewards['+i+'].xp='+v+';renderRewardList()" '
-          +'style="background:'+(active?"#f59e0b33":"var(--bg2)")
-          +';border:1px solid '+(active?"#f59e0b":"var(--border)")
-          +';color:'+(active?"#f59e0b":"var(--muted)")
+          +'style="background:'+(active?"var(--amber-33)":"var(--bg2)")
+          +';border:1px solid '+(active?"var(--amber)":"var(--border)")
+          +';color:'+(active?"var(--amber)":"var(--muted)")
           +';border-radius:5px;padding:3px 8px;cursor:pointer;font-size:10px">'+v+'</button>';
       }).join("");
       rows+='<div class="reward-skill-row">'
@@ -2158,9 +2271,10 @@ function selectQType(k){
     const btn=document.getElementById("qtype-"+key);
     if(!btn)return;
     if(key===k){
-      btn.style.background=t.color+"22";
-      btn.style.borderColor=t.color;
-      btn.style.color=t.color;
+      const tc=cssColor(t.color);
+      btn.style.background=tc+"22";
+      btn.style.borderColor=tc;
+      btn.style.color=tc;
     } else {
       btn.style.background="";btn.style.borderColor="";btn.style.color="";
     }
@@ -2364,6 +2478,8 @@ function boot(){
 }
 window.boot=boot;
 window.leaveToday=leaveToday;
+// 系統主題變動時 views.js 會回頭要一次重畫：資料色的亮度是渲染時算的。
+window.rerender=render;
 
 // 模組沒載入就沒有資料層。顯示一份空白的預設資料會讓人以為資料不見了，
 // 不如直接說清楚原因。

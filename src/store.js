@@ -1160,6 +1160,7 @@ export function createStore(backend = defaultBackend()){
           anchorDate: patch.anchorDate !== undefined ? patch.anchorDate : prev.anchorDate,
           anchorPhase: patch.anchorPhase !== undefined ? patch.anchorPhase : prev.anchorPhase,
           goalBindings: {...prev.goalBindings, ...(patch.goalBindings || {})},
+          theme: patch.theme !== undefined ? patch.theme : prev.theme,
         });
       }catch(err){ return {ok: false, reason: "invalid", message: err.message}; }
       const anchorMoved = next.anchorDate !== prev.anchorDate

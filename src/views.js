@@ -10,12 +10,35 @@ import {lvName, levelProgress, charTitle, coreLevels, BACKFILL_DAYS} from "./rpg
 import {ACHIEVEMENTS, achievementById, globalStreak} from "./achievements.js";
 import {weekRange} from "./review.js";
 import {createTodayView, esc} from "./today-view.js";
+import {THEME, applyTheme, shade, systemPrefersLight, watchSystemTheme} from "./theme.js";
 
 const store = createStore();
 const reminders = createReminders(store);
 // 今日頁與目標頁共用同一個 store 實例：各自 createStore() 會變成兩份記憶體
 // 狀態，其中一份的寫入會被另一份的下一次 commit 蓋掉。
 const todayView = createTodayView(store);
+
+// 目前實際套用的模式（已解析，只會是 light 或 dark）。渲染時要拿它決定資料色
+// 要不要壓暗，所以留在模組層而不是每次去讀 DOM。
+let themeMode = THEME.DARK;
+
+function refreshTheme(){
+  if(typeof window === "undefined" || !window.document) return themeMode;
+  themeMode = applyTheme(window.document.documentElement,
+                         store.plannerState().config.theme,
+                         systemPrefersLight(window));
+  syncStatusBar(window);
+  return themeMode;
+}
+
+// 手機的狀態列顏色跟著背景走。值直接問 CSS 要目前的 --bg，避免在 JS 裡再抄
+// 一份色碼：token 改了這裡自動跟上。
+function syncStatusBar(win){
+  const meta = win.document.querySelector('meta[name="theme-color"]');
+  if(!meta || typeof win.getComputedStyle !== "function") return;
+  const bg = win.getComputedStyle(win.document.documentElement).getPropertyValue("--bg").trim();
+  if(bg) meta.setAttribute("content", bg);
+}
 
 let sub = "today";            // today | goals | inbox
 const expanded = new Set();   // 展開完整步驟清單的目標 id
@@ -337,7 +360,7 @@ function render(){
     {k: "inbox", label: "收件匣"},
     {k: "review", label: "回顧"},
   ].map(t => `<button class="qtab ${sub === t.k ? "active" : ""}"
-    style="${sub === t.k ? "background:#4a9eff22;border-color:#4a9eff;color:#4a9eff" : ""}"
+    style="${sub === t.k ? "background:var(--blue-22);border-color:var(--blue);color:var(--blue)" : ""}"
     data-act="sub" data-sub="${t.k}">${t.label}</button>`).join("");
 
   const body = sub === "goals" ? renderGoals()
@@ -509,6 +532,19 @@ const api = {
   lvName,
   // 核心顏色進的是 inline style，跳脫擋不住 CSS 的分隔字元（§index.html）
   color: normalizeColor,
+
+  // ── 外觀主題（§THEME）──────────────────────────────────────────────────
+  // 渲染時要用的核心顏色走這裡：先過 normalizeColor 的安全判定，再依現在的
+  // 模式壓亮度。深色模式下 shade() 原樣退回，等於沒有這一層。
+  THEME,
+  themeColor(v){return shade(normalizeColor(v), themeMode);},
+  themeMode(){return themeMode;},
+  themePref(){return store.plannerState().config.theme;},
+  setTheme(pref){
+    const out = store.setPlannerConfig({theme: pref});
+    if(out.ok) refreshTheme();
+    return out;
+  },
   levelProgress,
   todayISO,           // §5.0 的邏輯日：整個 app 唯一的「今天」
 
@@ -618,6 +654,10 @@ function bind(root){
 export function install(){
   store.load();
   if(typeof window !== "undefined"){
+    refreshTheme();
+    // 系統主題在 app 開著時被改掉也要跟上，但只有偏好是 auto 時才有差別；
+    // refreshTheme() 自己會判斷，所以這裡不必再過濾一次。
+    watchSystemTheme(window, () => {refreshTheme(); if(typeof window.rerender === "function") window.rerender();});
     window.Goals = api;
     window.Reminders = reminders;
     window.Today = todayView.api;
