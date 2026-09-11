@@ -59,3 +59,24 @@ test("使用者輸入一律跳脫，不會被當成標記渲染", () => {
   assert.ok(!html.includes("<img src=x"), "原樣的標記不得進 innerHTML");
   assert.ok(html.includes("&lt;img src=x"));
 });
+
+test("已有紀錄時改班表：二次確認期間顯示的是待確認的提案，確定後真的改成它", () => {
+  const {store, view} = seeded();
+  const today = logicalToday();
+  store.setPlannerConfig({anchorDate: m.shiftDate(today, -1), anchorPhase: 0});
+  store.setDayPlan(today, {energy: m.ENERGY.MID});
+
+  const target = m.shiftDate(today, -3);
+  const blocked = view.api.saveAnchor({date: target, phase: 2});
+  assert.equal(blocked.ok, false);
+  assert.equal(blocked.reason, "has-days");
+  const html = view.render();
+  assert.ok(html.includes(`value="${target}"`), "輸入欄要留著剛選的日期");
+  assert.ok(html.includes('value="2" selected'), "班別也要留著");
+
+  const forced = view.api.saveAnchor({date: "不會被採用", phase: 0, force: true});
+  assert.equal(forced.ok, true);
+  const config = store.getState().planner.config;
+  assert.equal(config.anchorDate, target, "確定送出的是當初提案的值");
+  assert.equal(config.anchorPhase, 2);
+});

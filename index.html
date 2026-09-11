@@ -432,17 +432,19 @@ function loadState(){
   state=window.Goals.legacyState();
 }
 let saveTimer=null;
+// 回傳有沒有真的寫進去。寫入失敗時 saveLegacyState 會自己說明原因並回傳
+// undefined；把它吞掉之後照樣顯示「已儲存」，等於報一個重開就消失的成功。
 function writeState(){
   // Always persist current CORES state
   if(!state.cores)state.cores=[...CORES];
-  try{window.Goals.saveLegacyState(state);}catch{}
+  try{return !!window.Goals.saveLegacyState(state);}catch{return false;}
 }
 function saveState(silent=false){
   clearTimeout(saveTimer);
   saveTimer=setTimeout(()=>{
     saveTimer=null;
-    writeState();
-    if(!silent)showToast("✓ 已儲存");
+    const ok=writeState();
+    if(!silent&&ok)showToast("✓ 已儲存");
   },600);
 }
 // 把還在等 debounce 的編輯立刻寫進 store。匯出時一定要先做，否則剛改完名字

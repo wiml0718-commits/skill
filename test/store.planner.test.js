@@ -499,11 +499,17 @@ test("v3 的 planner 被截斷：缺少的區段計入損失，不會靜默清�
   assert.equal(store.inspect(full).total, 0, "完整的 v3 不算損失");
 
   const truncated = {...full, planner: {version: 1}};
-  // days / stepDetails / entries 三段不見
-  assert.equal(store.inspect(truncated).total, 3);
+  // config / days / stepDetails / entries 四段不見
+  assert.equal(store.inspect(truncated).total, 4);
 
   const badConfig = {...full, planner: {...full.planner, config: {anchorDate: "壞", anchorPhase: 0}}};
   assert.equal(store.inspect(badConfig).total, 1, "整段 config 歸零也是損失");
+
+  // 缺席的 config 會讓 createPlannerConfig 成功地做出一份空設定，不能因此
+  // 當成沒事——匯入時它會把有效的 anchor 與目標綁定換成預設值。
+  const noConfig = {...full, planner: {...full.planner}};
+  delete noConfig.planner.config;
+  assert.equal(store.inspect(noConfig).total, 1);
 });
 
 test("非今日計畫的寫入失敗同樣整個回復，不留下沒存進去的完成與 XP", () => {
@@ -525,4 +531,38 @@ test("非今日計畫的寫入失敗同樣整個回復，不留下沒存進去�
   assert.throws(() => store.adjustSkillXp(m.generalSkillId("think"), 50),
                 {name: "WriteError"});
   assert.deepEqual(store.getState().skills, before.skills);
+});
+
+// ── Codex Review 第 3 輪的回歸測試 ─────────────────────────────────────────
+test("接受主線與本次時間在同一次寫入落地", () => {
+  const be = backend();
+  const {store, goal, step} = seeded(be);
+  const today = TODAY();
+  store.setDayPlan(today, {availableMinutes: 60});
+
+  const ok = store.setDayFocus(today, {goalId: goal.id, stepId: step.id,
+                                       plannedMinutes: 25});
+  assert.equal(ok.ok, true);
+  const day = store.getState().planner.days[today];
+  assert.equal(day.focus.stepId, step.id);
+  assert.equal(day.plannedMinutes, 25, "不必再補第二次寫入");
+
+  // 沒帶 plannedMinutes 時沿用原值，不會被清掉
+  store.setDayFocus(today, {goalId: goal.id, stepId: step.id});
+  assert.equal(store.getState().planner.days[today].plannedMinutes, 25);
+});
+
+test("接受主線寫入失敗時，focus 與本次時間都不會留下", () => {
+  const be = backend();
+  const {store, goal, step} = seeded(be);
+  const today = TODAY();
+  const origSet = be.setItem;
+  be.setItem = (k, v) => {
+    if(k === STORAGE_KEY) throw new Error("quota");
+    origSet(k, v);
+  };
+  const res = store.setDayFocus(today, {goalId: goal.id, stepId: step.id,
+                                        plannedMinutes: 25});
+  assert.equal(res.ok, false);
+  assert.equal(store.getState().planner.days[today], undefined);
 });

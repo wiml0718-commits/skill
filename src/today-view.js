@@ -52,7 +52,9 @@ export function createTodayView(store){
   let openCriteria = false;
   let openSwitch = false;
   let openAnchor = false;
-  let anchorConfirm = null;   // 已有紀錄時改 anchor 的二次確認：待確認的天數
+  // 已有紀錄時改 anchor 的二次確認。要連使用者剛選的日期與班別一起留著：
+  // 重繪會把輸入欄依現有設定重建，只記天數的話按「確定要改」送出的是舊值。
+  let anchorConfirm = null;   // {days, date, phase}
   let editingDate = null;
   let adjustingTime = false;
 
@@ -151,15 +153,18 @@ export function createTodayView(store){
   // 班表設定。設定不是必填：沒設定就顯示未知，仍可手動排今天。設定過之後也要
   // 改得動——日期或班別選錯的話，這是唯一能修正的地方。
   function renderAnchorSetup(planner, today, phase){
-    if(phase !== null && !openAnchor){
+    // 二次確認期間一定要展開：收起來的話，說明與「確定要改」就跟著消失了。
+    if(phase !== null && !openAnchor && !anchorConfirm){
       return `<div class="today-row">
         <button class="today-btn ghost" data-tact="fold-anchor">編輯四日班表</button>
       </div>`;
     }
     const config = planner.config;
-    const date = config.anchorDate || today;
+    // 二次確認期間顯示的是待確認的提案，不是目前生效的設定。
+    const date = (anchorConfirm && anchorConfirm.date) || config.anchorDate || today;
+    const selected = anchorConfirm ? anchorConfirm.phase : config.anchorPhase;
     const options = PHASE_LABEL.map((label, i) =>
-      `<option value="${i}" ${config.anchorPhase === i ? "selected" : ""}>${esc(label)}</option>`
+      `<option value="${i}" ${selected === i ? "selected" : ""}>${esc(label)}</option>`
     ).join("");
     return `<div class="today-setup">
       <div class="today-muted">四日班表：選一個日期，並指出那天是循環的哪一天。</div>
@@ -172,7 +177,9 @@ export function createTodayView(store){
         ${phase === null ? "" : `<button class="today-btn ghost" data-tact="fold-anchor">取消</button>`}
       </div>
       ${anchorConfirm ? `<div class="today-editor">
-        <div class="today-err" role="alert">已經有 ${anchorConfirm} 天的紀錄。改起算日會讓過去的原定班別整批位移（實際出勤紀錄不受影響）。</div>
+        <div class="today-err" role="alert">已經有 ${anchorConfirm.days} 天的紀錄。改成
+          ${esc(anchorConfirm.date)}・${esc(PHASE_LABEL[anchorConfirm.phase] || "")}
+          會讓過去的原定班別整批位移（實際出勤紀錄不受影響）。</div>
         <div class="today-row">
           <button class="today-btn primary" data-tact="save-anchor" data-force="1">確定要改</button>
           <button class="today-btn ghost" data-tact="cancel-anchor">維持原設定</button>
@@ -536,21 +543,39 @@ export function createTodayView(store){
 
     accept(goalId, stepId){
       const today = logicalToday();
-      const res = store.setDayFocus(today, {goalId, stepId});
+      const snap = snapshot();
+      const day = snap.day;
+      // 接受時把這次的時間一併落地，之後改精力或班表都不會默默改掉它（§4）。
+      // 跟 focus 同一次寫入：分兩次的話，第二次失敗會留下一個沒有時間的今天。
+      const minutes = day && day.plannedMinutes !== null
+        ? undefined
+        : defaultPlannedMinutes(day ? day.availableMinutes : null,
+                                suggestForDay(snap.planner, today, today).minutes);
+      const res = store.setDayFocus(today, {goalId, stepId, plannedMinutes: minutes});
       if(res.ok){
-        // 接受時把這次的時間一併落地，之後改精力或班表都不會默默改掉它（§4）。
-        const snap = snapshot();
-        const day = snap.day;
-        if(!day || day.plannedMinutes === null){
-          const suggestion = suggestForDay(snap.planner, today, today);
-          const minutes = defaultPlannedMinutes(day ? day.availableMinutes : null,
-                                                suggestion.minutes);
-          store.setDayPlan(today, {plannedMinutes: minutes});
-        }
         requestId = null;
         draft.day = today;
       }
       apply(res, "已開始，接著做就好");
+    },
+
+    // 儲存班表。DOM 的讀取留在事件處理，這裡只處理規則，才驗得到二次確認
+    // 帶出去的是哪一組值。
+    saveAnchor({date, phase, force = false} = {}){
+      // 確認時送的是當初提案的值。重繪之後再讀一次輸入欄，讀到的會是重建過
+      // 的欄位，按下「確定要改」等於原封不動地把舊設定再存一次。
+      const anchorDate = force && anchorConfirm ? anchorConfirm.date : date;
+      const anchorPhase = force && anchorConfirm ? anchorConfirm.phase : phase;
+      const res = store.setPlannerConfig({anchorDate, anchorPhase, force});
+      // 已經有紀錄時不直接改，但也不是改不了：講清楚影響再讓使用者決定。
+      if(!res.ok && res.reason === "has-days"){
+        anchorConfirm = {days: res.days, date: anchorDate, phase: anchorPhase};
+        repaint();
+        return res;
+      }
+      if(res.ok){ openAnchor = false; anchorConfirm = null; }
+      apply(res, "已更新四日班表");
+      return res;
     },
 
     stop(){
@@ -668,18 +693,12 @@ export function createTodayView(store){
       }
       if(tact === "cancel-anchor"){ anchorConfirm = null; return repaint(); }
       if(tact === "save-anchor"){
-        const res = store.setPlannerConfig({
-          anchorDate: value("today-anchor-date"),
-          anchorPhase: Number(value("today-anchor-phase")),
+        api.saveAnchor({
+          date: value("today-anchor-date"),
+          phase: Number(value("today-anchor-phase")),
           force: el.dataset.force === "1",
         });
-        // 已經有紀錄時不直接改，但也不是改不了：講清楚影響再讓使用者決定。
-        if(!res.ok && res.reason === "has-days"){
-          anchorConfirm = res.days;
-          return repaint();
-        }
-        if(res.ok){ openAnchor = false; anchorConfirm = null; }
-        return apply(res, "已更新四日班表");
+        return;
       }
       if(tact === "save-bindings"){
         const bindings = {};

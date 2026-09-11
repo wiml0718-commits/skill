@@ -242,12 +242,15 @@ function sanitizePlanner(raw, report, {strict = false} = {}){
   const src = raw && typeof raw === "object" ? raw : {};
   const planner = model.createPlanner({version: src.version});
   // config 壞掉只退回未設定：為了一個壞掉的 anchor 丟掉整份成果不成比例。
-  // 但那是一整段設定不見了，v3 的資料要計入損失，不能靜默歸零。
+  // 但那是一整段設定不見了，v3 的資料要計入損失，不能靜默歸零。缺席與壞掉
+  // 一樣要算：`src.config || {}` 會讓缺席的那份安靜地變成一份有效的空設定。
+  let configLost = strict && (!src.config || typeof src.config !== "object");
   try{ planner.config = model.createPlannerConfig(src.config || {}); }
   catch{
     planner.config = model.createPlannerConfig({});
-    if(strict) report.missingSections += 1;
+    configLost = strict;
   }
+  if(configLost) report.missingSections += 1;
 
   // v3 的 planner 少了一整段（被截斷的備份）跟 steps 整段不見是同一件事：
   // 補一個空容器就回報成功，會讓匯入靜默清掉整份班表與成果。
@@ -1192,7 +1195,9 @@ export function createStore(backend = defaultBackend()){
     },
 
     // 接受今天的主線。未來不能接受：接受是「今天要做這個」的宣告（§3.1）。
-    setDayFocus(date, {goalId, stepId} = {}){
+    // 本次時間跟 focus 一起落地：分兩次寫的話，第二次失敗會留下一個已接受但
+    // plannedMinutes 還是 null 的今天，之後改精力或班表就會默默改掉顯示的時間。
+    setDayFocus(date, {goalId, stepId, plannedMinutes} = {}){
       let key, day;
       try{
         key = model.normalizeDue(date);
@@ -1212,6 +1217,7 @@ export function createStore(backend = defaultBackend()){
           ...prev,
           // 重新開始就不再是收工：模式跟著回到 active，並恢復原本的主線（§4）。
           mode: model.DAY_MODE.ACTIVE,
+          plannedMinutes: plannedMinutes === undefined ? prev.plannedMinutes : plannedMinutes,
           focus: {goalId, stepId, acceptedAt: new Date().toISOString()},
           updatedAt: new Date().toISOString(),
         });
