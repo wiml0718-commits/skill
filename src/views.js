@@ -9,19 +9,18 @@ import {createReminders, todayISO} from "./reminders.js";
 import {lvName, levelProgress, charTitle, coreLevels, BACKFILL_DAYS} from "./rpg.js";
 import {ACHIEVEMENTS, achievementById, globalStreak} from "./achievements.js";
 import {weekRange} from "./review.js";
+import {createTodayView, esc} from "./today-view.js";
 
 const store = createStore();
 const reminders = createReminders(store);
+// 今日頁與目標頁共用同一個 store 實例：各自 createStore() 會變成兩份記憶體
+// 狀態，其中一份的寫入會被另一份的下一次 commit 蓋掉。
+const todayView = createTodayView(store);
 
 let sub = "today";            // today | goals | inbox
 const expanded = new Set();   // 展開完整步驟清單的目標 id
 
 // ── 工具 ─────────────────────────────────────────────────────────────────────
-function esc(v){
-  return String(v ?? "").replace(/[&<>"']/g, c =>
-    ({"&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"}[c]));
-}
-
 function toast(msg){
   if(typeof window !== "undefined" && typeof window.showToast === "function") window.showToast(msg);
 }
@@ -582,8 +581,12 @@ export function install(){
   if(typeof window !== "undefined"){
     window.Goals = api;
     window.Reminders = reminders;
+    window.Today = todayView.api;
     const root = document.getElementById("content");
-    if(root) bind(root);
+    if(root){
+      bind(root);
+      todayView.bind(root);
+    }
   }
   return api;
 }
