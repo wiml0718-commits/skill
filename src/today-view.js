@@ -64,6 +64,16 @@ export function createTodayView(store){
 
   function say(kind, text){notice = {kind, text};}
 
+  // 接受主線時要落地的「本次時間」。已經選過就不動它，回 undefined 讓 store
+  // 沿用原值；還沒選過才用建議值。手動挑目標與依建議接受都走這裡，不各算一次。
+  function initialMinutes(today){
+    const snap = snapshot();
+    const day = snap.day;
+    if(day && day.plannedMinutes !== null) return undefined;
+    return defaultPlannedMinutes(day ? day.availableMinutes : null,
+                                 suggestForDay(snap.planner, today, today).minutes);
+  }
+
   // 寫入失敗的共同出口。草稿留著、requestId 不換，使用者可以直接重試（§6.2）。
   const FAIL_TEXT = {
     conflict: "另一個分頁已經存了新的資料。這次開啟不會再寫入，請重新載入頁面後再試一次，草稿還在。",
@@ -413,8 +423,16 @@ export function createTodayView(store){
   }
 
   // ── 5. 成果表單 ──────────────────────────────────────────────────────────
-  function renderOutcome({today}, focus){
+  function renderOutcome({today, day}, focus){
     if(!focus.step || focus.state !== "accepted") return "";
+    // 收工的當天刻意保留 focus，所以 resolveFocus 仍然回 accepted。表單留著的話
+    // 等於可以在「今天收工」之後照樣完成並拿 XP，繞過「重新選時間再開始」（§4）。
+    if(day && day.mode === DAY_MODE.RECOVERY){
+      return `<section class="today-card">
+        <div class="today-label">保存這次的成果</div>
+        <div class="today-muted">今天已收工。要記錄成果的話，先選一段正數時間並按「接著做」。</div>
+      </section>`;
+    }
     const err = field => (fieldError && fieldError.field === field
       ? `<div class="today-err" role="alert">${esc(fieldError.text)}</div>` : "");
     const crossed = draft.day && draft.day !== today
@@ -541,31 +559,29 @@ export function createTodayView(store){
         : okText);
     },
 
-    accept(goalId, stepId){
+    accept(goalId, stepId, extra = {}){
       const today = logicalToday();
-      const snap = snapshot();
-      const day = snap.day;
-      // 接受時把這次的時間一併落地，之後改精力或班表都不會默默改掉它（§4）。
-      // 跟 focus 同一次寫入：分兩次的話，第二次失敗會留下一個沒有時間的今天。
-      const minutes = day && day.plannedMinutes !== null
-        ? undefined
-        : defaultPlannedMinutes(day ? day.availableMinutes : null,
-                                suggestForDay(snap.planner, today, today).minutes);
-      const res = store.setDayFocus(today, {goalId, stepId, plannedMinutes: minutes});
+      const res = store.setDayFocus(today, {
+        goalId, stepId, ...extra,
+        // 接受時把這次的時間一併落地，之後改精力或班表都不會默默改掉它（§4）。
+        // 跟 focus 同一次寫入：分兩次的話，第二次失敗會留下一個沒有時間的今天。
+        plannedMinutes: initialMinutes(today),
+      });
       if(res.ok){
         requestId = null;
         draft.day = today;
       }
-      apply(res, "已開始，接著做就好");
+      apply(res, extra.changeReason ? "已換主線。舊的進度還留著。" : "已開始，接著做就好");
+      return res;
     },
 
     // 儲存班表。DOM 的讀取留在事件處理，這裡只處理規則，才驗得到二次確認
     // 帶出去的是哪一組值。
     saveAnchor({date, phase, force = false} = {}){
-      // 確認時送的是當初提案的值。重繪之後再讀一次輸入欄，讀到的會是重建過
-      // 的欄位，按下「確定要改」等於原封不動地把舊設定再存一次。
-      const anchorDate = force && anchorConfirm ? anchorConfirm.date : date;
-      const anchorPhase = force && anchorConfirm ? anchorConfirm.phase : phase;
+      // 確認期間輸入欄是用提案值填的，而且仍然可以再改。所以這裡一律採用送進來
+      // 的值——改用記下來的提案，會存成跟畫面上顯示的不同的一份班表。
+      const anchorDate = date;
+      const anchorPhase = phase;
       const res = store.setPlannerConfig({anchorDate, anchorPhase, force});
       // 已經有紀錄時不直接改，但也不是改不了：講清楚影響再讓使用者決定。
       if(!res.ok && res.reason === "has-days"){
@@ -594,6 +610,11 @@ export function createTodayView(store){
                                   goals: snap.state.goals, steps: snap.state.steps});
       if(!focus.step || focus.state !== "accepted"){
         say("error", "要先開始今天的主線才能保存成果。");
+        repaint();
+        return;
+      }
+      if(snap.day && snap.day.mode === DAY_MODE.RECOVERY){
+        say("error", "今天已收工。先選一段正數時間並按「接著做」，再記錄成果。");
         repaint();
         return;
       }
@@ -727,12 +748,13 @@ export function createTodayView(store){
           say("error", "這個目標沒有可行動的主線下一步。");
           return repaint();
         }
-        // 原因跟 focus 同一次寫入：分兩次的話，第二次失敗會留下一個已經換過
-        // 但原因不見了的今天，畫面卻已經說「已換主線」。
-        const res = store.setDayFocus(today, {goalId, stepId: next.id,
-                                              changeReason: value("today-reason")});
-        if(res.ok) openSwitch = false;
-        return apply(res, "已換主線。舊的進度還留著。");
+        // 原因跟 focus、本次時間同一次寫入：分開寫的話，後面那次失敗會留下一個
+        // 已經換過但原因或時間不見了的今天，畫面卻已經說「已換主線」。
+        const reason = value("today-reason");
+        openSwitch = false;
+        const res = api.accept(goalId, next.id, {changeReason: reason});
+        if(!res.ok) openSwitch = true;
+        return;
       }
       if(tact === "daily"){
         try{ store.completeStep(id); say("ok", "✓ 已打卡"); }

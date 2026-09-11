@@ -74,9 +74,37 @@ test("已有紀錄時改班表：二次確認期間顯示的是待確認的提�
   assert.ok(html.includes(`value="${target}"`), "輸入欄要留著剛選的日期");
   assert.ok(html.includes('value="2" selected'), "班別也要留著");
 
-  const forced = view.api.saveAnchor({date: "不會被採用", phase: 0, force: true});
+  // 確認畫面上的輸入欄仍可再改，所以送出的一律以當下的值為準。
+  const revised = m.shiftDate(today, -5);
+  const forced = view.api.saveAnchor({date: revised, phase: 1, force: true});
   assert.equal(forced.ok, true);
   const config = store.getState().planner.config;
-  assert.equal(config.anchorDate, target, "確定送出的是當初提案的值");
-  assert.equal(config.anchorPhase, 2);
+  assert.equal(config.anchorDate, revised, "確認畫面上改過的值要算數");
+  assert.equal(config.anchorPhase, 1);
+});
+
+test("收工的當天不提供成果表單，要先重新開始", () => {
+  const {store, goal, step, view} = seeded();
+  const today = logicalToday();
+  store.setDayFocus(today, {goalId: goal.id, stepId: step.id});
+  assert.ok(view.render().includes('data-tact="submit"'), "進行中的一天有成果表單");
+
+  store.setDayPlan(today, {mode: m.DAY_MODE.RECOVERY, plannedMinutes: 0});
+  const html = view.render();
+  assert.ok(!html.includes('data-tact="submit"'),
+            "收工後仍留著送出鈕，等於可以繞過「重新選時間再開始」直接拿 XP");
+  assert.ok(html.includes("今天已收工"));
+  // 主線與進度都還在
+  assert.equal(store.getState().planner.days[today].focus.stepId, step.id);
+});
+
+test("手動挑目標接受主線時，本次時間也一起存下來", () => {
+  const {store, goal, step, view} = seeded();
+  const today = logicalToday();
+  store.setDayPlan(today, {availableMinutes: 60, energy: m.ENERGY.MID});
+  const res = view.api.accept(goal.id, step.id, {changeReason: "改推這個"});
+  assert.equal(res.ok, true);
+  const day = store.getState().planner.days[today];
+  assert.equal(day.plannedMinutes, 25, "不能留 null 讓之後改精力默默改掉時間");
+  assert.equal(day.changeReason, "改推這個");
 });
