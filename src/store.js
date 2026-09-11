@@ -201,6 +201,13 @@ function sanitize(raw){
     }catch{ report.skippedAchievements += 1; }
   }
 
+  // 根 version 決定缺 planner 算不算損失：v2 沒有 planner 是正常的，v3 沒有
+  // 代表這份資料被截斷了。
+  const storedVersion = Number.isSafeInteger(raw.version) ? raw.version : 2;
+  if(storedVersion >= SCHEMA_VERSION
+     && (!raw.planner || typeof raw.planner !== "object")){
+    report.missingSections += 1;
+  }
   data.planner = sanitizePlanner(raw.planner, report);
 
   return {data, report};
@@ -295,6 +302,21 @@ function toLegacySkill(s){
 
 // 匯入的轉換。inspect() 與 replaceAll() 共用，才不會出現「試算說沒問題、
 // 實際匯入卻掉資料」這種兩套邏輯各自演化的情況。
+// 這份資料的版本這個 App 讀不讀得懂。load()、inspect() 與 replaceAll() 共用，
+// 否則「開啟時擋下、匯入時照吃」會讓同一份未來版本的備份從匯入這條路被降級
+// 成 v3 並抹掉不認得的欄位。
+function isUnsupportedVersion(raw){
+  if(!raw || typeof raw !== "object") return false;
+  const version = Number.isSafeInteger(raw.version) ? raw.version : null;
+  if(version !== null && version > SCHEMA_VERSION) return true;
+  const planner = raw.planner;
+  if(planner && typeof planner === "object"
+     && Number.isSafeInteger(planner.version) && planner.version > model.PLANNER_VERSION){
+    return true;
+  }
+  return false;
+}
+
 function convert(raw){
   const looksV1 = raw && typeof raw === "object" && !raw.profile
     && (Array.isArray(raw.subSkills) || typeof raw.charName === "string");
@@ -326,25 +348,34 @@ export function createStore(backend = defaultBackend()){
   let lastSerialized = null;
   // 這次載入把 v2 升成了 v3。呼叫端要讓使用者看得到。
   let upgraded = false;
+  // 偵測到別的分頁寫過新資料。一旦成立就整個 session 唯讀：這份記憶體狀態
+  // 是從舊快照長出來的，任何一條路徑寫下去都會吃掉對方的資料。
+  let staleTab = false;
 
   // 寫入結果必須回得去：成果與 XP 的流程要分得出「已保存」與「沒寫進去」，
   // 不能吞掉例外之後還顯示成功（§6.2）。
-  function persist({guard = false} = {}){
-    // 三種情況一律不寫：讀不到儲存（記憶體狀態不是使用者真正的資料）、這次載入
-    // 丟掉了東西而原樣快照沒留成（現有的存檔是那幾筆僅存的一份），以及版本比
-    // 這個 App 新。
-    if(holdWrites) return {ok: false, reason: degraded ? "degraded" : unsupported ? "unsupported" : "readonly"};
+  function blockedReason(){
+    if(staleTab) return "conflict";
+    if(!holdWrites) return null;
+    return degraded ? "degraded" : unsupported ? "unsupported" : "readonly";
+  }
+
+  function persist(){
+    // 四種情況一律不寫：讀不到儲存（記憶體狀態不是使用者真正的資料）、這次載入
+    // 丟掉了東西而原樣快照沒留成（現有的存檔是那幾筆僅存的一份）、版本比這個
+    // App 新，以及別的分頁已經寫過新資料。
+    const blocked = blockedReason();
+    if(blocked) return {ok: false, reason: blocked};
     let text;
     try{ text = JSON.stringify(data); }
     catch{ return {ok: false, reason: "serialize"}; }
-    if(guard){
-      const cur = read(backend, STORAGE_KEY);
-      if(!cur.ok) return {ok: false, reason: "read"};
-      // 別的分頁已經寫過了。用這份較舊的快照覆蓋會靜默吃掉對方的資料，
-      // 所以擋在資料層，不是只把按鈕 disable 掉。
-      if(lastSerialized !== null && cur.text !== null && cur.text !== lastSerialized){
-        return {ok: false, reason: "conflict"};
-      }
+    // 比對擺在每一條寫入路徑上，不是只有今日計畫：目標、步驟、XP、legacy 快照
+    // 同樣是「整份覆寫」，任何一條用舊快照寫下去都會吃掉別的分頁剛存的東西。
+    const cur = read(backend, STORAGE_KEY);
+    if(!cur.ok) return {ok: false, reason: "read"};
+    if(lastSerialized !== null && cur.text !== null && cur.text !== lastSerialized){
+      staleTab = true;
+      return {ok: false, reason: "conflict"};
     }
     try{ backend.setItem(STORAGE_KEY, text); }
     catch{ return {ok: false, reason: "write"}; }
@@ -353,23 +384,22 @@ export function createStore(backend = defaultBackend()){
     // 刻意不回傳 data：內部紀錄一律不外流，避免呼叫端繞過驗證改到內部狀態。
   }
 
-  function commit(opts){
+  function commit(){
     ensureGeneralSkills(data);
     const today = logicalToday();
     updatePeaks(data, today);
     unlockAchievements(today);
     // 上限在 store 層強制執行，不能只靠 UI（§3.6）
     data.xpLog = compressXpLog(data.xpLog, today);
-    return persist(opts);
+    return persist();
   }
 
   // 候選狀態：先在複本上套完所有變更，序列化與寫入都成功才採用（§6.2）。
   // 失敗時 data 原封不動——不能先 completeStep() 寫一次、再寫成果第二次，
   // 那會在中途失敗時留下「任務完成了但沒有成果」的半筆結算。
   function transact(apply){
-    if(holdWrites){
-      return {ok: false, reason: degraded ? "degraded" : unsupported ? "unsupported" : "readonly"};
-    }
+    const blocked = blockedReason();
+    if(blocked) return {ok: false, reason: blocked};
     const backup = data;
     const unlockBackup = freshUnlocks.slice();
     const restore = () => {
@@ -384,7 +414,7 @@ export function createStore(backend = defaultBackend()){
     let value;
     try{ value = apply(); }
     catch(err){ restore(); throw err; }
-    const written = commit({guard: true});
+    const written = commit();
     if(!written.ok){
       restore();
       return {ok: false, reason: written.reason};
@@ -628,7 +658,8 @@ export function createStore(backend = defaultBackend()){
     // 遷移或載入時跳過了哪些資料。呼叫端負責讓使用者看得到。
     migrationReport(){
       return {...report, total: reportTotal(report), migrated, fresh, degraded,
-              unsupported, upgraded, readOnly: degraded || holdWrites};
+              unsupported, upgraded, conflict: staleTab,
+              readOnly: degraded || holdWrites || staleTab};
     },
 
     // 對外一律回傳複本，避免呼叫端繞過 store 直接改到內部陣列
@@ -1094,13 +1125,14 @@ export function createStore(backend = defaultBackend()){
       }catch(err){ return {ok: false, reason: "invalid", message: err.message}; }
       const out = transact(() => {data.planner.days[key] = day;});
       if(!out.ok) return out;
+      // 這次「想要的」本次時間：patch 沒帶就是原本已選的值。只調低可用時間
+      // 一樣會把它夾到上限，那時候也要讓使用者看得到，不能默默改掉（§4）。
+      const requested = patch.plannedMinutes !== undefined
+        ? patch.plannedMinutes : prev.plannedMinutes;
       return {
         ok: true,
         day: {...day, focus: day.focus ? {...day.focus} : null},
-        // 可用時間調低把已選時間夾到上限時要讓使用者看得到，不能默默改掉（§4）。
-        clamped: patch.plannedMinutes !== undefined
-          && Number.isSafeInteger(patch.plannedMinutes)
-          && day.plannedMinutes !== patch.plannedMinutes,
+        clamped: Number.isSafeInteger(requested) && day.plannedMinutes !== requested,
       };
     },
 
@@ -1217,12 +1249,20 @@ export function createStore(backend = defaultBackend()){
     // 試算一份備份會轉出什麼，但不落地。匯入是破壞性的：現有資料被蓋掉之後
     // 才告訴使用者「有 N 筆沒進來」已經來不及了。
     inspect(raw){
+      if(isUnsupportedVersion(raw)){
+        return {...emptyReport(), total: 0, migrated: false, unsupported: true};
+      }
       const out = convert(raw);
-      return {...out.report, total: reportTotal(out.report), migrated: out.looksV1};
+      return {...out.report, total: reportTotal(out.report), migrated: out.looksV1,
+              unsupported: false};
     },
 
-    // v2 直接吃；認得出 v1 就走同一條遷移路徑（§7.4）
+    // v2 直接吃；認得出 v1 就走同一條遷移路徑（§7.4）。版本比這個 App 新時
+    // 一律拒收：降級匯入會把不認得的欄位靜默抹掉，跟覆寫一份新版存檔一樣。
     replaceAll(raw){
+      if(isUnsupportedVersion(raw)){
+        throw new Error("這份備份的版本比目前的 App 新，無法匯入，也不會覆蓋現有資料");
+      }
       const out = convert(raw);
       data = out.data;
       report = out.report;

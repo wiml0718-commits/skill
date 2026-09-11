@@ -418,3 +418,68 @@ test("成果文字超過上限時整筆擋下，不留半筆結算", () => {
   assert.equal(store.getState().steps.find(s => s.id === step.id).state,
                before.steps.find(s => s.id === step.id).state);
 });
+
+// ── Codex Review 第 1 輪的回歸測試 ─────────────────────────────────────────
+test("任何一條寫入路徑都會擋下舊快照覆寫，不只今日計畫", () => {
+  const be = backend();
+  const {store} = seeded(be);
+  const mine = be.raw(STORAGE_KEY);
+  const theirs = {...mine, profile: {...mine.profile, charName: "另一個分頁"}};
+  be.put(STORAGE_KEY, theirs);
+
+  // 舊的那一頁按「新增目標」：記憶體會變，但不得寫進去
+  store.addGoal({title: "舊分頁新增的", coreId: "think"});
+  assert.equal(be.raw(STORAGE_KEY).profile.charName, "另一個分頁");
+  assert.equal(be.raw(STORAGE_KEY).goals.length, mine.goals.length);
+  const report = store.migrationReport();
+  assert.equal(report.conflict, true);
+  assert.equal(report.readOnly, true);
+  // 偵測到之後整個 session 唯讀：後續寫入一律回報衝突，不會偷偷成功
+  assert.equal(store.setDayPlan(TODAY(), {energy: m.ENERGY.LOW}).reason, "conflict");
+});
+
+test("匯入版本比 App 新的備份：試算回報不支援，replaceAll 直接拒收", () => {
+  const {store, goal} = seeded();
+  const before = store.getState();
+  const future = {...JSON.parse(JSON.stringify(before)), version: SCHEMA_VERSION + 1};
+  assert.equal(store.inspect(future).unsupported, true);
+  assert.throws(() => store.replaceAll(future), /版本比目前的 App 新/);
+  assert.equal(store.getState().goals.find(g => g.id === goal.id).title, goal.title);
+
+  const newerPlanner = {...JSON.parse(JSON.stringify(before)),
+                        planner: {...before.planner, version: m.PLANNER_VERSION + 1}};
+  assert.equal(store.inspect(newerPlanner).unsupported, true);
+  assert.throws(() => store.replaceAll(newerPlanner));
+});
+
+test("v3 的存檔缺 planner 算損壞；v2 缺 planner 不算", () => {
+  const base = {profile: {}, cores: [], skills: [], goals: [], steps: [], xpLog: [],
+                achievements: [], meta: {}};
+  const store = createStore(backend());
+  store.load();
+  assert.ok(store.inspect({...base, version: SCHEMA_VERSION}).total > 0,
+            "v3 少了 planner 就是被截斷了");
+  assert.equal(store.inspect({...base, version: 2}).total, 0,
+               "v2 本來就沒有 planner");
+
+  // 載入時同樣走損壞保護：留了原樣快照才准覆寫
+  const be = backend({[STORAGE_KEY]: {...base, version: SCHEMA_VERSION}});
+  const loaded = createStore(be);
+  loaded.load();
+  assert.ok(loaded.migrationReport().total > 0);
+  assert.ok(be.has("skill-damaged-v2"), "原樣另存一份才准覆寫");
+});
+
+test("只調低可用時間、沒動本次時間時，也會回報已縮到上限", () => {
+  const {store} = seeded();
+  const today = TODAY();
+  store.setDayPlan(today, {availableMinutes: 60});
+  store.setDayPlan(today, {plannedMinutes: 25});
+  const lowered = store.setDayPlan(today, {availableMinutes: 5});
+  assert.equal(lowered.ok, true);
+  assert.equal(lowered.clamped, true);
+  assert.equal(lowered.day.plannedMinutes, 5);
+  // 沒有被夾到時不要謊報
+  const same = store.setDayPlan(today, {energy: m.ENERGY.HIGH});
+  assert.equal(same.clamped, false);
+});

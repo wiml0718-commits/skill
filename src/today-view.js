@@ -62,7 +62,7 @@ export function createTodayView(store){
 
   // 寫入失敗的共同出口。草稿留著、requestId 不換，使用者可以直接重試（§6.2）。
   const FAIL_TEXT = {
-    conflict: "另一個分頁已經存了新的資料。請重新載入頁面後再試一次，草稿還在。",
+    conflict: "另一個分頁已經存了新的資料。這次開啟不會再寫入，請重新載入頁面後再試一次，草稿還在。",
     readonly: "目前是唯讀模式，尚未保存。請先處理載入時回報的資料問題。",
     unsupported: "存檔版本比這個版本新，尚未保存，也不會覆蓋原本的資料。",
     degraded: "讀不到儲存空間，尚未保存。",
@@ -499,7 +499,12 @@ export function createTodayView(store){
 
     setDayField(patch, okText){
       const today = logicalToday();
-      apply(store.setDayPlan(today, patch), okText);
+      const res = store.setDayPlan(today, patch);
+      // 調低可用時間會把已選的本次時間一併縮到上限，那不是「已更新可用時間」
+      // 一句話交代得完的事（§4）。
+      apply(res, res.ok && res.clamped
+        ? `${okText}；本次時間已縮到 ${res.day.plannedMinutes} 分鐘`
+        : okText);
     },
 
     accept(goalId, stepId){
