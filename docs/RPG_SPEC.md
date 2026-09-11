@@ -648,4 +648,5 @@ PR 1 要依 v2 模型驗證，所以每一個新欄位都必須有明定的預�
 ## 10. 相關文件
 
 - [`ROADMAP.md`](ROADMAP.md)：分階段 PR 拆解與各階段驗收標準
+- [`TODAY_PLAN.md`](TODAY_PLAN.md)：今日主線與四日班表（schema v3 的 planner）
 - [`../CLAUDE.md`](../CLAUDE.md)：本 repository 的開發與 Review 規則
