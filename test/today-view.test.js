@@ -1,0 +1,110 @@
+// 今日頁的渲染。render() 只組字串、不碰 DOM，所以能直接在測試裡驗。
+import {test} from "node:test";
+import assert from "node:assert/strict";
+import {createStore} from "../src/store.js";
+import {createTodayView} from "../src/today-view.js";
+import {logicalToday} from "../src/rpg.js";
+import * as m from "../src/model.js";
+
+function backend(){
+  const map = new Map();
+  return {getItem: k => (map.has(k) ? map.get(k) : null),
+          setItem: (k, v) => {map.set(k, String(v));}};
+}
+
+function seeded(){
+  const store = createStore(backend());
+  store.load();
+  const goal = store.addGoal({title: "做出第一版", coreId: "think"});
+  const step = store.addStep({goalId: goal.id, title: "寫下規格", kind: m.STEP_KIND.MAIN});
+  const view = createTodayView(store);
+  return {store, goal, step, view};
+}
+
+test("目標被封存後，它底下的日常維持就不再出現在今日頁", () => {
+  const {store, goal, view} = seeded();
+  store.addStep({goalId: goal.id, title: "睡前記錄一句", kind: m.STEP_KIND.DAILY});
+  assert.ok(view.render().includes("睡前記錄一句"), "進行中的目標照常顯示");
+
+  store.setGoalStatus(goal.id, m.GOAL_STATUS.ARCHIVED);
+  const html = view.render();
+  assert.ok(!html.includes("睡前記錄一句"),
+            "封存目標底下的每日任務不該還留著一個能拿 XP 的打卡鈕");
+  assert.ok(!html.includes('data-tact="daily"'));
+});
+
+test("沒有綁目標的日常維持不受影響", () => {
+  const {store, view} = seeded();
+  const skill = store.getState().skills.find(s => s.id === m.generalSkillId("body"));
+  store.addStep({title: "喝水", kind: m.STEP_KIND.DAILY,
+                 rewards: [{skillId: skill.id, xp: 5}]});
+  assert.ok(view.render().includes("喝水"));
+});
+
+test("班表設定好之後仍然改得動", () => {
+  const {store, view} = seeded();
+  assert.ok(view.render().includes('data-tact="save-anchor"'), "還沒設定時直接顯示表單");
+
+  store.setPlannerConfig({anchorDate: m.shiftDate(logicalToday(), -1), anchorPhase: 0});
+  const html = view.render();
+  assert.ok(html.includes('data-tact="fold-anchor"'),
+            "設定過之後仍要有編輯入口，否則日期選錯就再也改不回來");
+});
+
+test("使用者輸入一律跳脫，不會被當成標記渲染", () => {
+  const {store, view} = seeded();
+  const goal = store.addGoal({title: '<img src=x onerror="alert(1)">', coreId: "think"});
+  store.addStep({goalId: goal.id, title: "正常步驟", kind: m.STEP_KIND.MAIN});
+  const html = view.render();
+  assert.ok(!html.includes("<img src=x"), "原樣的標記不得進 innerHTML");
+  assert.ok(html.includes("&lt;img src=x"));
+});
+
+test("已有紀錄時改班表：二次確認期間顯示的是待確認的提案，確定後真的改成它", () => {
+  const {store, view} = seeded();
+  const today = logicalToday();
+  store.setPlannerConfig({anchorDate: m.shiftDate(today, -1), anchorPhase: 0});
+  store.setDayPlan(today, {energy: m.ENERGY.MID});
+
+  const target = m.shiftDate(today, -3);
+  const blocked = view.api.saveAnchor({date: target, phase: 2});
+  assert.equal(blocked.ok, false);
+  assert.equal(blocked.reason, "has-days");
+  const html = view.render();
+  assert.ok(html.includes(`value="${target}"`), "輸入欄要留著剛選的日期");
+  assert.ok(html.includes('value="2" selected'), "班別也要留著");
+
+  // 確認畫面上的輸入欄仍可再改，所以送出的一律以當下的值為準。
+  const revised = m.shiftDate(today, -5);
+  const forced = view.api.saveAnchor({date: revised, phase: 1, force: true});
+  assert.equal(forced.ok, true);
+  const config = store.getState().planner.config;
+  assert.equal(config.anchorDate, revised, "確認畫面上改過的值要算數");
+  assert.equal(config.anchorPhase, 1);
+});
+
+test("收工的當天不提供成果表單，要先重新開始", () => {
+  const {store, goal, step, view} = seeded();
+  const today = logicalToday();
+  store.setDayFocus(today, {goalId: goal.id, stepId: step.id});
+  assert.ok(view.render().includes('data-tact="submit"'), "進行中的一天有成果表單");
+
+  store.setDayPlan(today, {mode: m.DAY_MODE.RECOVERY, plannedMinutes: 0});
+  const html = view.render();
+  assert.ok(!html.includes('data-tact="submit"'),
+            "收工後仍留著送出鈕，等於可以繞過「重新選時間再開始」直接拿 XP");
+  assert.ok(html.includes("今天已收工"));
+  // 主線與進度都還在
+  assert.equal(store.getState().planner.days[today].focus.stepId, step.id);
+});
+
+test("手動挑目標接受主線時，本次時間也一起存下來", () => {
+  const {store, goal, step, view} = seeded();
+  const today = logicalToday();
+  store.setDayPlan(today, {availableMinutes: 60, energy: m.ENERGY.MID});
+  const res = view.api.accept(goal.id, step.id, {changeReason: "改推這個"});
+  assert.equal(res.ok, true);
+  const day = store.getState().planner.days[today];
+  assert.equal(day.plannedMinutes, 25, "不能留 null 讓之後改精力默默改掉時間");
+  assert.equal(day.changeReason, "改推這個");
+});

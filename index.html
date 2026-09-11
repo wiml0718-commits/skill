@@ -306,6 +306,63 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 .daily-done-badge{display:inline-flex;align-items:center;gap:4px;font-size:9px;
   color:#10b981;background:#10b98118;border:1px solid #10b98144;
   padding:2px 8px;border-radius:4px;margin-left:6px;}
+/* ── 今日頁 ── */
+.today-page{padding-bottom:70px;display:flex;flex-direction:column;gap:10px;}
+.today-card{background:var(--bg2);border:1px solid var(--border);border-radius:14px;
+  padding:14px;display:flex;flex-direction:column;gap:8px;}
+.today-card.focus{border-color:#f59e0b55;background:linear-gradient(180deg,#1a140022,var(--bg2));}
+.today-date{font-family:'Cinzel',serif;font-size:18px;color:var(--text);letter-spacing:1px;}
+.today-shift{font-size:13px;color:#4a9eff;}
+.today-line{font-size:14px;color:var(--text);line-height:1.6;}
+.today-streak{font-size:15px;color:#f59e0b;line-height:1.6;}
+.today-muted{font-size:12px;color:var(--muted);line-height:1.6;}
+.today-label{font-size:12px;color:var(--muted);letter-spacing:2px;}
+.today-goal{font-size:13px;color:#4a9eff;}
+.today-step{font-size:18px;color:var(--text);line-height:1.5;}
+.today-done{font-size:13px;color:#10b981;background:#10b98112;border:1px solid #10b98144;
+  border-radius:8px;padding:8px;}
+.today-check{font-size:13px;color:var(--text);background:var(--bg3);border-radius:8px;padding:8px;}
+.today-row{display:flex;flex-wrap:wrap;gap:8px;}
+.today-btn{min-height:48px;padding:12px 14px;border-radius:10px;cursor:pointer;
+  font-size:14px;font-family:'Share Tech Mono',monospace;flex:1 1 auto;
+  background:var(--bg3);border:1px solid var(--border2);color:var(--text);}
+.today-btn.on{background:#4a9eff22;border-color:#4a9eff;color:#4a9eff;}
+.today-btn.primary{background:#f59e0b22;border-color:#f59e0b;color:#f59e0b;}
+.today-btn.ghost{background:transparent;color:var(--muted);}
+.today-btn[disabled]{opacity:.45;cursor:not-allowed;}
+.today-fold{background:none;border:none;color:var(--muted);font-size:13px;cursor:pointer;
+  text-align:left;padding:8px 0;min-height:48px;font-family:'Share Tech Mono',monospace;}
+.today-input{width:100%;min-height:48px;font-size:16px;padding:10px;border-radius:8px;
+  background:var(--bg);border:1px solid var(--border2);color:var(--text);
+  font-family:'Share Tech Mono',monospace;}
+textarea.today-input{min-height:72px;resize:vertical;}
+.today-week{display:grid;grid-template-columns:repeat(auto-fit,minmax(86px,1fr));gap:6px;}
+.today-cell{display:flex;flex-direction:column;gap:4px;min-height:56px;padding:8px 6px;
+  border-radius:8px;cursor:pointer;background:var(--bg);border:1px solid var(--border);
+  color:var(--text);font-family:'Share Tech Mono',monospace;text-align:left;}
+.today-cell.is-today{border-color:#f59e0b;}
+.today-cell.is-actual{background:#4a9eff12;}
+.today-cell.is-future{color:var(--muted);}
+.today-cell-date{font-size:12px;color:var(--muted);}
+.today-cell-text{font-size:13px;}
+.today-editor{display:flex;flex-direction:column;gap:8px;padding:10px;border-radius:10px;
+  background:var(--bg);border:1px solid var(--border);}
+.today-daily{display:flex;align-items:center;justify-content:space-between;gap:8px;
+  font-size:14px;color:var(--text);padding:4px 0;}
+.today-daily .today-btn{flex:0 0 auto;}
+.today-check-row{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--text);
+  min-height:48px;cursor:pointer;}
+.today-check-row input{width:22px;height:22px;}
+.today-err{font-size:13px;color:#ef4444;}
+.today-notice{font-size:13px;line-height:1.6;}
+.today-notice.ok{color:#10b981;background:#10b98112;border:1px solid #10b98144;
+  border-radius:8px;padding:10px;}
+.today-notice.error{color:#ef4444;background:#ef444412;border:1px solid #ef444444;
+  border-radius:8px;padding:10px;}
+@media (max-width:340px){
+  .today-week{grid-template-columns:repeat(2,1fr);}
+  .today-btn{flex:1 1 100%;}
+}
 </style>
 </head>
 <body>
@@ -319,13 +376,13 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
   </div>
   <div id="content"></div>
   <div id="tabbar">
-    <button class="tab active" data-tab="skills" onclick="switchTab('skills')">
+    <button class="tab" data-tab="skills" onclick="switchTab('skills')">
       <span class="tab-icon">⚔️</span>技能樹
     </button>
     <button class="tab" data-tab="stats" onclick="switchTab('stats')">
       <span class="tab-icon">📊</span>統計
     </button>
-    <button class="tab" data-tab="quests" onclick="switchTab('quests')">
+    <button class="tab active" data-tab="quests" onclick="switchTab('quests')">
       <span class="tab-icon">📜</span>任務
     </button>
     <button class="tab" data-tab="goals" onclick="switchTab('goals')">
@@ -375,17 +432,19 @@ function loadState(){
   state=window.Goals.legacyState();
 }
 let saveTimer=null;
+// 回傳有沒有真的寫進去。寫入失敗時 saveLegacyState 會自己說明原因並回傳
+// undefined；把它吞掉之後照樣顯示「已儲存」，等於報一個重開就消失的成功。
 function writeState(){
   // Always persist current CORES state
   if(!state.cores)state.cores=[...CORES];
-  try{window.Goals.saveLegacyState(state);}catch{}
+  try{return !!window.Goals.saveLegacyState(state);}catch{return false;}
 }
 function saveState(silent=false){
   clearTimeout(saveTimer);
   saveTimer=setTimeout(()=>{
     saveTimer=null;
-    writeState();
-    if(!silent)showToast("✓ 已儲存");
+    const ok=writeState();
+    if(!silent&&ok)showToast("✓ 已儲存");
   },600);
 }
 // 把還在等 debounce 的編輯立刻寫進 store。匯出時一定要先做，否則剛改完名字
@@ -446,8 +505,27 @@ function updateNav(){
 }
 
 // ── Views ─────────────────────────────────────────────────────────────────────
-let currentTab="skills";
+// 今日頁是預設入口：打開 App 先看到今天要做什麼，而不是整棵技能樹。
+let currentTab="quests";
+let questView="today"; // today | all
 let statsSub="grow";   // grow | ach | review
+
+function switchQuestView(v){questView=v;render();}
+// 今日頁的次要入口用得到：從今日跳到全部任務或目標頁。
+function leaveToday(where){
+  if(where==="goals"){switchTab("goals");return;}
+  questView="all";
+  render();
+}
+function questViewTabs(){
+  const btn=(v,label)=>`<button onclick="switchQuestView('${v}')"
+    style="flex:1;min-height:48px;padding:10px;border-radius:8px;cursor:pointer;font-size:13px;
+    background:${questView===v?"#4a9eff22":"var(--bg)"};
+    border:1px solid ${questView===v?"#4a9eff":"var(--border2)"};
+    color:${questView===v?"#4a9eff":"var(--muted)"}">${label}</button>`;
+  return `<div style="display:flex;gap:8px;margin-bottom:12px">
+    ${btn("today","☀️ 今日")}${btn("all","📜 全部任務")}</div>`;
+}
 
 function switchStatsSub(v){statsSub=v;render();}
 function statsSubTabs(){
@@ -480,7 +558,9 @@ function render(){
       el.innerHTML=statsSubTabs()+(statsSub==="ach"?renderAchievements()
         :statsSub==="review"?renderReview():renderStats());
     }else if(currentTab==="quests"){
-      el.innerHTML=renderQuests();
+      el.innerHTML=questViewTabs()+(questView==="today"
+        ?(window.Today?window.Today.render():`<div class="empty-state">載入中…</div>`)
+        :renderQuests());
     }else if(currentTab==="goals"){
       el.innerHTML=window.Goals?window.Goals.render():`<div class="empty-state">載入中…</div>`;
     }else{
@@ -1055,6 +1135,9 @@ function importData(e){
       // 匯入會覆蓋目前的資料且無法復原，所以先試算一次。等蓋掉之後才說
       // 「有 N 項沒進來」已經來不及了。
       const preview=window.Goals.inspectPayload(d);
+      if(preview.unsupported){
+        throw new Error("這份備份的版本比目前的 App 新。現有資料沒有被更動。");
+      }
       if(preview.total>0&&!confirm(
         `這份備份有 ${preview.total} 項資料無法完整轉入，匯入後不會出現。\n`+
         "目前的資料會被覆蓋，且無法復原。\n\n仍要匯入嗎？")){
@@ -1446,11 +1529,13 @@ function saveSub(){
     d.xp=0;
     state.subSkills.push({...d,id});
   }
-  writeState();
+  // 沒寫進去就不要往下走：後面接的是「✓ 已儲存」與升級提示。
+  if(!writeState()){loadState();closeModal();render();return;}
   try{
     window.Goals.setSkillXp(id,targetXp);
   }catch{
     showToast("XP 沒有存進去，請重新整理再試",2500);
+    loadState();closeModal();render();return;
   }
   loadState();
   const newLv=calcLv(getCoreXP(d.coreId));
@@ -1867,7 +1952,10 @@ function completeQuest(id){
   const before=new Map(window.Goals.listSkills().map(x=>[x.id,x.xp||0]));
   try{
     window.Goals.completeStep(id);
-  }catch{
+  }catch(err){
+    // 寫入失敗跟「還沒指定歸屬」是兩回事：儲存空間滿了卻反過來問要算到哪個
+    // 核心，只會讓人再失敗一次。
+    if(err&&err.name==="WriteError")return;
     // 收件匣是唯一沒有事先歸屬的 kind，完成時才問（§4.3）。沒選就不完成。
     if(s.kind!=="inbox"){showToast("完成失敗，請重新整理再試");return;}
     const coreId=window.Goals.pickCore("這次完成的 XP 要算到哪個核心？");
@@ -2241,6 +2329,13 @@ function boot(){
           "你原本的資料很可能還在，只是這次拿不到，因此這個工作階段不會寫入任何東西。\n\n"+
           "請關掉無痕／隱私模式或解除網站資料限制後再開一次。");
   }
+  // 未來版本的存檔多半是乾淨的（total 為 0），不特別擋的話畫面看起來一切正常，
+  // 使用者照常操作、照常看到成功提示，重開卻什麼都沒留下。
+  if(r.unsupported){
+    alert("這份存檔是較新版本的 App 寫的，目前這個版本讀不完整。\n"+
+          "為了不覆蓋掉你的資料，這次開啟不會寫入任何東西，所有變更都不會保存。\n\n"+
+          "請改用較新版本開啟。");
+  }
   // 只有全新安裝才給預設技能，而且立刻落地。若改用「技能是空的就補預設」，
   // 使用者把技能全部刪光之後重開，這批預設會自己長回來。
   if(r.fresh&&!state.subSkills.length){
@@ -2268,6 +2363,7 @@ function boot(){
   showDailySummary();
 }
 window.boot=boot;
+window.leaveToday=leaveToday;
 
 // 模組沒載入就沒有資料層。顯示一份空白的預設資料會讓人以為資料不見了，
 // 不如直接說清楚原因。

@@ -33,6 +33,10 @@ export function emptyReport(){
     // createSkill / createStep 內部濾掉的欄位：整筆留下來了，裡面少了東西
     droppedNotes: 0,
     droppedStreakDays: 0,
+    // v3 的今日計畫：壞掉的每日紀錄、步驟補充說明與成果紀錄
+    skippedPlannerDays: 0,
+    skippedStepDetails: 0,
+    skippedPlannerEntries: 0,
   };
 }
 
@@ -45,7 +49,9 @@ export function reportTotal(report){
        + report.skippedGoals + report.skippedSteps + report.droppedRewards
        + report.missingSections + report.orphanSkills
        + report.skippedXpLog + report.skippedAchievements
-       + report.droppedNotes + report.droppedStreakDays;
+       + report.droppedNotes + report.droppedStreakDays
+       + report.skippedPlannerDays + report.skippedStepDetails
+       + report.skippedPlannerEntries;
 }
 
 // 前綴解決的是命名空間，不是碰撞：兩筆 quest 帶著相同數字 id 時，加了前綴仍然
@@ -336,7 +342,7 @@ export function migrateV1({pwa = null, goals = null, now = new Date()} = {}){
   }
 
   const data = {
-    version: 2,
+    version: model.DATA_VERSION,
     profile: model.createProfile({
       charName: typeof src.charName === "string" ? src.charName : undefined,
       createdAt: now.toISOString(),
@@ -350,6 +356,8 @@ export function migrateV1({pwa = null, goals = null, now = new Date()} = {}){
     xpLog: [],
     achievements: [],
     meta: model.createMeta({activeDays: [...activeDays]}),
+    // v1 沒有班表與成果紀錄，補一份空的，不造假資料（§7.2）。
+    planner: model.createPlanner({}),
   };
 
   return {data, report};

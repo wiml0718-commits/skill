@@ -1,7 +1,7 @@
 // ── 目標檢視 ─────────────────────────────────────────────────────────────────
 // 今日 / 目標 / 收件匣三個檢視。資料一律經由 store 取得，不直接碰 localStorage。
 
-import {createStore} from "./store.js";
+import {createStore, WriteError} from "./store.js";
 import {STEP_STATE, STEP_STATE_LABEL, STEP_KIND, GOAL_STATUS, hasDeferWarning,
         DEFER_WARN_THRESHOLD, LEVEL_XP, MAX_LV, calcLv, calcStreak, shiftDate,
         KIND_DEFAULT_XP, normalizeColor} from "./model.js";
@@ -9,19 +9,18 @@ import {createReminders, todayISO} from "./reminders.js";
 import {lvName, levelProgress, charTitle, coreLevels, BACKFILL_DAYS} from "./rpg.js";
 import {ACHIEVEMENTS, achievementById, globalStreak} from "./achievements.js";
 import {weekRange} from "./review.js";
+import {createTodayView, esc} from "./today-view.js";
 
 const store = createStore();
 const reminders = createReminders(store);
+// 今日頁與目標頁共用同一個 store 實例：各自 createStore() 會變成兩份記憶體
+// 狀態，其中一份的寫入會被另一份的下一次 commit 蓋掉。
+const todayView = createTodayView(store);
 
 let sub = "today";            // today | goals | inbox
 const expanded = new Set();   // 展開完整步驟清單的目標 id
 
 // ── 工具 ─────────────────────────────────────────────────────────────────────
-function esc(v){
-  return String(v ?? "").replace(/[&<>"']/g, c =>
-    ({"&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"}[c]));
-}
-
 function toast(msg){
   if(typeof window !== "undefined" && typeof window.showToast === "function") window.showToast(msg);
 }
@@ -543,6 +542,43 @@ const api = {
   migrationReport(){return store.migrationReport();},
 };
 
+// 寫入失敗是新的錯誤型別，既有的呼叫點都沒有處理過它。集中在這裡攔下來：
+// 明講沒有保存，然後依已經回復的狀態重畫——讓畫面留著一個沒存進去的結果，
+// 比直接說失敗更糟。業務規則的錯誤（例如缺 XP 歸屬）照舊往上丟給原本的處理。
+// 說明沒有保存、依已回復的狀態重畫，然後**把錯誤繼續往上丟**。只回一個
+// undefined 的話，index.html 那些 inline handler 會若無其事地往下走，接著跳
+// 「✓ 已完成 / 已儲存 / +XP」——畫面報的成功比什麼都不說更糟。
+function guardWrites(target, names){
+  for(const name of names){
+    const fn = target[name];
+    target[name] = (...args) => {
+      try{ return fn(...args); }
+      catch(err){
+        if(!(err instanceof WriteError)) throw err;
+        alert(err.message);
+        repaint();
+        throw err;
+      }
+    };
+  }
+}
+
+// index.html 的內嵌 script 直接呼叫這些方法，而且沒有一個包了 try / catch。
+guardWrites(api, ["createStep", "updateStep", "deleteStep", "archiveStep",
+  "archiveDoneSteps", "deleteStepsWhere", "assignStep", "completeStep",
+  "backfillDaily", "adjustSkillXp", "setSkillXp", "assignXpEntry", "mergeSkills",
+  "saveLegacyState", "markDailySummarySeen", "markWeeklyReviewSeen"]);
+
+// 目標頁自己的動作走委派監聽，統一包在這裡，不必每個動作各寫一次。
+function runAction(fn){
+  try{ fn(); }
+  catch(err){
+    if(!(err instanceof WriteError)) throw err;
+    alert(err.message);
+    repaint();
+  }
+}
+
 // 事件委派：#content 這個元素本身在每次 render 都存在（只有 innerHTML 被換掉），
 // 所以監聽掛一次就夠，也不會干擾其他分頁自己的 inline handler。
 function bind(root){
@@ -551,29 +587,31 @@ function bind(root){
     if(!el || !root.contains(el)) return;
     const {act, id, sub: target} = el.dataset;
     flushLegacy();
-    if(act === "sub") return api.setSub(target);
-    if(act === "add-goal") return api.addGoal();
-    if(act === "capture") return api.capture();
-    if(act === "complete") return api.complete(id);
-    if(act === "defer") return api.defer(id);
-    if(act === "drop") return api.drop(id);
-    if(act === "schedule") return api.schedule(id);
-    if(act === "add-step") return api.addStep(id);
-    if(act === "toggle") return api.toggle(id);
-    if(act === "archive") return api.archive(id);
+    runAction(() => {
+      if(act === "sub") return api.setSub(target);
+      if(act === "add-goal") return api.addGoal();
+      if(act === "capture") return api.capture();
+      if(act === "complete") return api.complete(id);
+      if(act === "defer") return api.defer(id);
+      if(act === "drop") return api.drop(id);
+      if(act === "schedule") return api.schedule(id);
+      if(act === "add-step") return api.addStep(id);
+      if(act === "toggle") return api.toggle(id);
+      if(act === "archive") return api.archive(id);
+    });
   });
 
   root.addEventListener("change", e => {
     const el = e.target.closest('[data-act="assign"]');
     if(!el || !root.contains(el)) return;
     flushLegacy();
-    api.assign(el.dataset.id, el.value);
+    runAction(() => api.assign(el.dataset.id, el.value));
   });
 
   root.addEventListener("keydown", e => {
     if(e.key !== "Enter" || e.target.id !== "inbox-input") return;
     flushLegacy();
-    api.capture();
+    runAction(() => api.capture());
   });
 }
 
@@ -582,8 +620,12 @@ export function install(){
   if(typeof window !== "undefined"){
     window.Goals = api;
     window.Reminders = reminders;
+    window.Today = todayView.api;
     const root = document.getElementById("content");
-    if(root) bind(root);
+    if(root){
+      bind(root);
+      todayView.bind(root);
+    }
   }
   return api;
 }

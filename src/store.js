@@ -12,8 +12,10 @@ import {logicalToday, resolveGrants, compressXpLog, canBackfill,
 import {evaluateAchievements} from "./achievements.js";
 import {dailySummary, hasDailyContent, weeklySummary} from "./review.js";
 
+// key 名稱保留不動，才讀得到既有資料。判斷 schema 的是 version 欄位，不是 key。
 export const STORAGE_KEY = "skill-rpg-v2";
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = model.DATA_VERSION;
+export const PLANNER_VERSION = model.PLANNER_VERSION;
 
 // 舊 key 保留不動，作為最後的回退路徑（§7.1）
 export const LEGACY_PWA_KEY = "skill-pwa-v1";
@@ -22,6 +24,28 @@ export const BACKUP_KEY = "skill-backup-v1";
 // 既有 v2 解得開但含壞資料時的原樣快照。sanitize 丟掉的那幾筆也許還救得回來，
 // 覆寫之後就真的沒了。
 export const DAMAGED_KEY = "skill-damaged-v2";
+// v2 → v3 升級前的原樣快照。升級是不可逆的，留不成就不准寫升級結果。
+export const UPGRADE_BACKUP_KEY = "skill-backup-v2";
+
+// 寫入失敗的統一型別。呼叫端只要顯示 message 就是誠實的說法，不必各自翻譯
+// reason；型別本身讓 UI 分得出「沒寫進去」與「這件事本來就不該做」。
+export const WRITE_FAIL_TEXT = {
+  conflict: "另一個分頁已經存了新的資料。這次的變更沒有保存，也沒有覆蓋對方的資料；請重新載入頁面後再試一次。",
+  degraded: "讀不到瀏覽器儲存空間，這次的變更沒有保存。",
+  unsupported: "這份存檔是較新版本寫的，這次的變更沒有保存，也不會覆蓋原本的資料。",
+  readonly: "目前是唯讀模式，這次的變更沒有保存。請先處理載入時回報的資料問題。",
+  write: "沒有保存：瀏覽器儲存空間可能已滿。請清出空間後再試一次。",
+  serialize: "沒有保存，請再試一次。",
+  read: "沒有保存，請再試一次。",
+};
+
+export class WriteError extends Error {
+  constructor(reason){
+    super(WRITE_FAIL_TEXT[reason] || "沒有保存，請再試一次。");
+    this.name = "WriteError";
+    this.reason = reason;
+  }
+}
 
 // backend 介面只需要 getItem / setItem，方便替換與測試。
 function memoryBackend(){
@@ -50,6 +74,7 @@ function emptyData(){
     xpLog: [],
     achievements: [],
     meta: model.createMeta({}),
+    planner: model.createPlanner({}),
   };
 }
 
@@ -63,6 +88,24 @@ function copySkill(s){
   return s ? {...s, notes: s.notes.map(n => ({...n})),
               mergedFrom: s.mergedFrom ? [...s.mergedFrom] : null} : s;
 }
+// planner 是三層巢狀（days / stepDetails / entries），淺拷貝一樣會讓呼叫端
+// 改到內部紀錄，繞過驗證。
+function copyPlanner(p){
+  const days = {};
+  for(const [date, day] of Object.entries(p.days)){
+    days[date] = {...day, focus: day.focus ? {...day.focus} : null};
+  }
+  const stepDetails = {};
+  for(const [id, detail] of Object.entries(p.stepDetails)) stepDetails[id] = {...detail};
+  return {
+    version: p.version,
+    config: {...p.config, goalBindings: {...p.config.goalBindings}},
+    days,
+    stepDetails,
+    entries: p.entries.map(e => ({...e})),
+  };
+}
+
 const copy = rec => (rec ? {...rec} : rec);
 const copyAll = (list, fn = copy) => list.map(fn);
 
@@ -91,6 +134,12 @@ function read(backend, key){
 // 匯入一份被截斷的備份就會把現有的目標與步驟清掉還回報成功，所以要計入損失。
 const V2_ARRAYS = ["cores", "skills", "goals", "steps", "xpLog", "achievements"];
 const V2_OBJECTS = ["profile", "meta"];
+
+// `typeof [] === "object"`：只看 typeof 的話，一個 `config: []` 會被當成正常的
+// 設定區段，匯入時安靜地把 anchor 與目標綁定換成預設值。
+function isPlainObject(v){
+  return !!v && typeof v === "object" && !Array.isArray(v);
+}
 
 function sanitize(raw){
   const data = emptyData();
@@ -178,7 +227,73 @@ function sanitize(raw){
     }catch{ report.skippedAchievements += 1; }
   }
 
+  // 根 version 決定缺 planner 算不算損失：v2 沒有 planner 是正常的，v3 沒有
+  // 代表這份資料被截斷了。
+  const storedVersion = Number.isSafeInteger(raw.version) ? raw.version : 2;
+  // 根 version 缺漏或壞掉時不能就當成 v2：那會把 planner 的完整性檢查整組關掉，
+  // 一份沒有 version 但帶著 planner 的備份就能靜默清掉班表與成果。帶著 planner
+  // 這件事本身就說明它是 v3 形狀的資料。
+  const isV3 = storedVersion >= SCHEMA_VERSION || raw.planner !== undefined;
+  if(isV3 && !isPlainObject(raw.planner)) report.missingSections += 1;
+  data.planner = sanitizePlanner(raw.planner, report, {strict: isV3});
+
   return {data, report};
+}
+
+// planner 缺席是 v2 的常態，不是損失：升級時補一份空的就好。裡面的單筆壞資料
+// 才進 report——跟 steps 一樣，壞的是那一筆，不是整個區段。
+//
+// 指向已不存在的 goal / step 的紀錄一律保留：成果是使用者寫下的事實，
+// 目標被刪掉不代表那件事沒發生。畫面自己決定顯不顯示得出來。
+function sanitizePlanner(raw, report, {strict = false} = {}){
+  const src = raw && typeof raw === "object" ? raw : {};
+  const planner = model.createPlanner({version: src.version});
+  // config 壞掉只退回未設定：為了一個壞掉的 anchor 丟掉整份成果不成比例。
+  // 但那是一整段設定不見了，v3 的資料要計入損失，不能靜默歸零。缺席與壞掉
+  // 一樣要算：`src.config || {}` 會讓缺席的那份安靜地變成一份有效的空設定。
+  let configLost = strict && !isPlainObject(src.config);
+  try{ planner.config = model.createPlannerConfig(src.config || {}); }
+  catch{
+    planner.config = model.createPlannerConfig({});
+    configLost = strict;
+  }
+  if(configLost) report.missingSections += 1;
+
+  // v3 的 planner 少了一整段（被截斷的備份）跟 steps 整段不見是同一件事：
+  // 補一個空容器就回報成功，會讓匯入靜默清掉整份班表與成果。
+  if(strict){
+    if(!isPlainObject(src.days)) report.missingSections += 1;
+    if(!isPlainObject(src.stepDetails)) report.missingSections += 1;
+    if(!Array.isArray(src.entries)) report.missingSections += 1;
+  }
+
+  const days = isPlainObject(src.days) ? src.days : {};
+  for(const [date, value] of Object.entries(days)){
+    try{
+      const key = model.normalizeDue(date);
+      if(!key) throw new Error("日期不得為空");
+      planner.days[key] = model.createPlannerDay(value || {});
+    }catch{ report.skippedPlannerDays += 1; }
+  }
+
+  const details = isPlainObject(src.stepDetails) ? src.stepDetails : {};
+  for(const [id, value] of Object.entries(details)){
+    try{ planner.stepDetails[id] = model.createStepDetail(value || {}); }
+    catch{ report.skippedStepDetails += 1; }
+  }
+
+  const seen = new Set();
+  for(const e of Array.isArray(src.entries) ? src.entries : []){
+    try{
+      const entry = model.createPlannerEntry(e);
+      // 同一次提交只留一筆：重試共用 requestId，重播不該變成兩筆成果。
+      if(seen.has(entry.requestId)) continue;
+      seen.add(entry.requestId);
+      planner.entries.push(entry);
+    }catch{ report.skippedPlannerEntries += 1; }
+  }
+
+  return planner;
 }
 
 // 每個核心都要有承接技能，接住沒有指定 rewards 的 XP（§4.3）。
@@ -229,6 +344,21 @@ function toLegacySkill(s){
 
 // 匯入的轉換。inspect() 與 replaceAll() 共用，才不會出現「試算說沒問題、
 // 實際匯入卻掉資料」這種兩套邏輯各自演化的情況。
+// 這份資料的版本這個 App 讀不讀得懂。load()、inspect() 與 replaceAll() 共用，
+// 否則「開啟時擋下、匯入時照吃」會讓同一份未來版本的備份從匯入這條路被降級
+// 成 v3 並抹掉不認得的欄位。
+function isUnsupportedVersion(raw){
+  if(!raw || typeof raw !== "object") return false;
+  const version = Number.isSafeInteger(raw.version) ? raw.version : null;
+  if(version !== null && version > SCHEMA_VERSION) return true;
+  const planner = raw.planner;
+  if(planner && typeof planner === "object"
+     && Number.isSafeInteger(planner.version) && planner.version > model.PLANNER_VERSION){
+    return true;
+  }
+  return false;
+}
+
 function convert(raw){
   const looksV1 = raw && typeof raw === "object" && !raw.profile
     && (Array.isArray(raw.subSkills) || typeof raw.charName === "string");
@@ -253,14 +383,46 @@ export function createStore(backend = defaultBackend()){
   const freshUnlocks = [];
   // 儲存讀不到時進入唯讀模式：資料只留在記憶體，一律不寫回去。
   let degraded = false;
+  // 存檔版本比這個 App 認得的還新：能顯示就顯示，但絕不覆寫。
+  let unsupported = false;
+  // 這次 session 最後一次讀到 / 寫出的序列化內容。別的分頁寫過之後會對不上，
+  // 用來擋住「拿舊快照蓋掉新資料」（§6.2）。
+  let lastSerialized = null;
+  // 這次載入把 v2 升成了 v3。呼叫端要讓使用者看得到。
+  let upgraded = false;
+  // 偵測到別的分頁寫過新資料。一旦成立就整個 session 唯讀：這份記憶體狀態
+  // 是從舊快照長出來的，任何一條路徑寫下去都會吃掉對方的資料。
+  let staleTab = false;
+
+  // 寫入結果必須回得去：成果與 XP 的流程要分得出「已保存」與「沒寫進去」，
+  // 不能吞掉例外之後還顯示成功（§6.2）。
+  function blockedReason(){
+    if(staleTab) return "conflict";
+    if(!holdWrites) return null;
+    return degraded ? "degraded" : unsupported ? "unsupported" : "readonly";
+  }
 
   function persist(){
-    // 兩種情況一律不寫：讀不到儲存（記憶體狀態不是使用者真正的資料），以及
-    // 這次載入丟掉了東西而原樣快照沒留成（現有的 v2 是那幾筆僅存的一份）。
-    if(holdWrites) return;
-    try{
-      backend.setItem(STORAGE_KEY, JSON.stringify(data));
-    }catch{ /* 配額滿或無法寫入時保持記憶體狀態，不讓 UI 崩掉 */ }
+    // 四種情況一律不寫：讀不到儲存（記憶體狀態不是使用者真正的資料）、這次載入
+    // 丟掉了東西而原樣快照沒留成（現有的存檔是那幾筆僅存的一份）、版本比這個
+    // App 新，以及別的分頁已經寫過新資料。
+    const blocked = blockedReason();
+    if(blocked) return {ok: false, reason: blocked};
+    let text;
+    try{ text = JSON.stringify(data); }
+    catch{ return {ok: false, reason: "serialize"}; }
+    // 比對擺在每一條寫入路徑上，不是只有今日計畫：目標、步驟、XP、legacy 快照
+    // 同樣是「整份覆寫」，任何一條用舊快照寫下去都會吃掉別的分頁剛存的東西。
+    const cur = read(backend, STORAGE_KEY);
+    if(!cur.ok) return {ok: false, reason: "read"};
+    if(lastSerialized !== null && cur.text !== null && cur.text !== lastSerialized){
+      staleTab = true;
+      return {ok: false, reason: "conflict"};
+    }
+    try{ backend.setItem(STORAGE_KEY, text); }
+    catch{ return {ok: false, reason: "write"}; }
+    lastSerialized = text;
+    return {ok: true};
     // 刻意不回傳 data：內部紀錄一律不外流，避免呼叫端繞過驗證改到內部狀態。
   }
 
@@ -271,7 +433,44 @@ export function createStore(backend = defaultBackend()){
     unlockAchievements(today);
     // 上限在 store 層強制執行，不能只靠 UI（§3.6）
     data.xpLog = compressXpLog(data.xpLog, today);
-    persist();
+    return persist();
+  }
+
+  // 候選狀態：先在複本上套完所有變更，序列化與寫入都成功才採用（§6.2）。
+  // 失敗時 data 原封不動——不能先 completeStep() 寫一次、再寫成果第二次，
+  // 那會在中途失敗時留下「任務完成了但沒有成果」的半筆結算。
+  function transact(apply){
+    const blocked = blockedReason();
+    if(blocked) return {ok: false, reason: blocked};
+    const backup = data;
+    const unlockBackup = freshUnlocks.slice();
+    const restore = () => {
+      data = backup;
+      freshUnlocks.length = 0;
+      freshUnlocks.push(...unlockBackup);
+    };
+    let working;
+    try{ working = JSON.parse(JSON.stringify(data)); }
+    catch{ return {ok: false, reason: "serialize"}; }
+    data = working;
+    let value;
+    try{ value = apply(); }
+    catch(err){ restore(); throw err; }
+    const written = commit();
+    if(!written.ok){
+      restore();
+      return {ok: false, reason: written.reason};
+    }
+    return {ok: true, value};
+  }
+
+  // 會改到資料的公開方法都走這裡。transact() 已經保證「寫得進去才採用」，
+  // mutate() 再把失敗轉成 WriteError 丟出去——回傳正常值卻沒寫進去，等於讓
+  // 畫面顯示一個重開就會消失的成功。
+  function mutate(apply){
+    const out = transact(apply);
+    if(!out.ok) throw new WriteError(out.reason);
+    return out.value;
   }
 
   // 成就只加不減（§6.2）：判定是純函式，這裡只負責把新達成的那幾筆補上時間。
@@ -295,6 +494,20 @@ export function createStore(backend = defaultBackend()){
     migrated = false;
     fresh = false;
     degraded = true;
+    holdWrites = true;
+    ensureGeneralSkills(data);
+    return store.getState();
+  }
+
+  // 存檔版本高於支援版本（或 planner 是未知的內部版本）：盡量解讀出來給人看，
+  // 但一個字都不寫。reset 成空白等於拿舊版把新版資料清掉（§6.2）。
+  function enterUnsupported(raw){
+    const out = sanitize(raw);
+    data = out.data;
+    report = out.report;
+    migrated = false;
+    fresh = false;
+    unsupported = true;
     holdWrites = true;
     ensureGeneralSkills(data);
     return store.getState();
@@ -392,9 +605,16 @@ export function createStore(backend = defaultBackend()){
     return i;
   }
 
+  // 只改狀態的那幾個轉換共用同一條路徑，省得每個都重寫一次查找。
+  function applyToStep(id, fn, ...args){
+    const i = findStep(id);
+    return replaceStep(i, fn(data.steps[i], ...args));
+  }
+
+  // 只換掉那一筆，不落地：落地由外層的 mutate() 統一處理，否則同一次操作會
+  // 寫兩次，而且中途失敗時前半段已經寫進去了。
   function replaceStep(i, step){
     data.steps = data.steps.map((s, n) => (n === i ? step : s));
-    commit();
     return copyStep(step);
   }
 
@@ -408,6 +628,15 @@ export function createStore(backend = defaultBackend()){
       if(!decoded.ok) return enterDegraded();
       const existing = decoded.value;
       if(existing){
+        // 這份文字就是目前存檔的原樣。記下來才分得出「我寫的」與「別的分頁寫的」。
+        lastSerialized = primary.text;
+        const storedVersion = Number.isSafeInteger(existing.version) ? existing.version : 2;
+        const plannerVersion = existing.planner && Number.isSafeInteger(existing.planner.version)
+          ? existing.planner.version : model.PLANNER_VERSION;
+        // 高於支援版本或未知的 planner 版本：保留原始資料，禁止覆蓋。
+        if(storedVersion > SCHEMA_VERSION || plannerVersion > model.PLANNER_VERSION){
+          return enterUnsupported(existing);
+        }
         const out = sanitize(existing);
         data = out.data;
         report = out.report;
@@ -427,6 +656,22 @@ export function createStore(backend = defaultBackend()){
           }
           // 既有快照是更早的另一份時同樣不動：覆蓋它等於用舊損失換新損失。
           holdWrites = !saved;
+        }
+        // v2 → v3：只補一份空的 planner 與版本標記，其餘欄位原封不動（§6.2）。
+        // 升級是不可逆的，所以先把升級前的原樣留一份；留不成就不准寫升級結果。
+        // 已經是 v3 就不再跑一次。
+        if(storedVersion < SCHEMA_VERSION){
+          const upgradeRead = read(backend, UPGRADE_BACKUP_KEY);
+          // 既有快照是更早的一份升級前備份，本身就是有效的還原點，不覆寫。
+          let saved = upgradeRead.ok && !!upgradeRead.text;
+          if(upgradeRead.ok && !upgradeRead.text){
+            try{
+              backend.setItem(UPGRADE_BACKUP_KEY, primary.text);
+              saved = true;
+            }catch{ /* 配額滿等寫入失敗 */ }
+          }
+          if(saved) upgraded = true;
+          else holdWrites = true;
         }
       }else{
         const pwaRead = read(backend, LEGACY_PWA_KEY);
@@ -471,7 +716,8 @@ export function createStore(backend = defaultBackend()){
     // 遷移或載入時跳過了哪些資料。呼叫端負責讓使用者看得到。
     migrationReport(){
       return {...report, total: reportTotal(report), migrated, fresh, degraded,
-              readOnly: degraded || holdWrites};
+              unsupported, upgraded, conflict: staleTab,
+              readOnly: degraded || holdWrites || staleTab};
     },
 
     // 對外一律回傳複本，避免呼叫端繞過 store 直接改到內部陣列
@@ -486,11 +732,12 @@ export function createStore(backend = defaultBackend()){
         xpLog: copyAll(data.xpLog),
         achievements: copyAll(data.achievements),
         meta: {...data.meta, activeDays: [...data.meta.activeDays]},
+        planner: copyPlanner(data.planner),
       };
     },
 
     save(){
-      commit();
+      mutate(() => {});
       return store.getState();
     },
 
@@ -506,17 +753,19 @@ export function createStore(backend = defaultBackend()){
 
     // 沒有東西可報的那幾天也要記下來，不然每次開 App 都要重算一次昨天。
     markDailySummarySeen(){
-      data.meta = {...data.meta, lastDailySummaryDate: logicalToday()};
-      commit();
-      return data.meta.lastDailySummaryDate;
+      return mutate(() => {
+        data.meta = {...data.meta, lastDailySummaryDate: logicalToday()};
+        return data.meta.lastDailySummaryDate;
+      });
     },
 
     weeklyReview(){return weeklySummary(store.getState(), logicalToday());},
 
     markWeeklyReviewSeen(){
-      data.meta = {...data.meta, lastWeeklyReviewDate: logicalToday()};
-      commit();
-      return data.meta.lastWeeklyReviewDate;
+      return mutate(() => {
+        data.meta = {...data.meta, lastWeeklyReviewDate: logicalToday()};
+        return data.meta.lastWeeklyReviewDate;
+      });
     },
 
     // ── 成就（§6.2）─────────────────────────────────────────────────────────
@@ -532,18 +781,20 @@ export function createStore(backend = defaultBackend()){
 
     // ── Goal ────────────────────────────────────────────────────────────────
     addGoal({title, why = "", coreId = null} = {}){
-      const goal = model.createGoal({title, why, coreId});
-      data.goals = [...data.goals, goal];
-      commit();
-      return copy(goal);
+      return mutate(() => {
+        const goal = model.createGoal({title, why, coreId});
+        data.goals = [...data.goals, goal];
+        return copy(goal);
+      });
     },
 
     updateGoal(id, patch = {}){
-      const i = findGoal(id);
-      const goal = model.createGoal({...data.goals[i], ...patch, id});
-      data.goals = data.goals.map((g, n) => (n === i ? goal : g));
-      commit();
-      return copy(goal);
+      return mutate(() => {
+        const i = findGoal(id);
+        const goal = model.createGoal({...data.goals[i], ...patch, id});
+        data.goals = data.goals.map((g, n) => (n === i ? goal : g));
+        return copy(goal);
+      });
     },
 
     setGoalStatus(id, status){return store.updateGoal(id, {status});},
@@ -551,21 +802,23 @@ export function createStore(backend = defaultBackend()){
     // ── Step ────────────────────────────────────────────────────────────────
     addStep({goalId = null, kind, title, due = null, dueTime = null, desc = "",
              xp, rewards} = {}){
-      if(goalId !== null) findGoal(goalId);
-      const k = kind || (goalId === null ? model.STEP_KIND.INBOX : model.STEP_KIND.MAIN);
-      const step = model.createStep({
-        goalId, kind: k, title, due, dueTime, desc, xp, rewards,
-        createdAt: new Date().toISOString(),
-        order: model.nextOrder(data.steps, k === model.STEP_KIND.INBOX ? null : goalId),
+      return mutate(() => {
+        if(goalId !== null) findGoal(goalId);
+        const k = kind || (goalId === null ? model.STEP_KIND.INBOX : model.STEP_KIND.MAIN);
+        const step = model.createStep({
+          goalId, kind: k, title, due, dueTime, desc, xp, rewards,
+          createdAt: new Date().toISOString(),
+          order: model.nextOrder(data.steps, k === model.STEP_KIND.INBOX ? null : goalId),
+        });
+        requireAttribution(step);
+        data.steps = [...data.steps, step];
+        return copyStep(step);
       });
-      requireAttribution(step);
-      data.steps = [...data.steps, step];
-      commit();
-      return copyStep(step);
     },
 
     // 編輯。歸屬是儲存前的必要條件，改壞了同樣擋下來（§4.3）。
     updateStep(id, patch = {}){
+      return mutate(() => {
       const i = findStep(id);
       const prev = data.steps[i];
       if(patch.goalId !== undefined && patch.goalId !== null) findGoal(patch.goalId);
@@ -580,49 +833,56 @@ export function createStore(backend = defaultBackend()){
         step.deferCount = 0;
       }
       return replaceStep(i, step);
+      });
     },
 
     deleteStep(id){
-      const i = findStep(id);
-      const gone = data.steps[i];
-      data.steps = data.steps.filter((s, n) => n !== i);
-      commit();
-      return copyStep(gone);
+      return mutate(() => {
+        const i = findStep(id);
+        const gone = data.steps[i];
+        data.steps = data.steps.filter((s, n) => n !== i);
+        return copyStep(gone);
+      });
     },
 
     // 封存與 state 正交：只決定顯不顯示在清單裡，不改變完成或放棄（§3.5）。
     archiveStep(id, on = true){
-      const i = findStep(id);
-      return replaceStep(i, {...data.steps[i], archived: on === true,
-                             archivedAt: on === true ? new Date().toISOString() : null});
+      return mutate(() => {
+        const i = findStep(id);
+        return replaceStep(i, {...data.steps[i], archived: on === true,
+                               archivedAt: on === true ? new Date().toISOString() : null});
+      });
     },
 
     // 批次封存 / 清除。daily 不進 DONE（§5.1），連遷移進來還停在 DONE 的也一併
     // 排除——把它封存掉等於把一個還在跑的習慣藏起來。
     archiveDoneSteps(){
-      const at = new Date().toISOString();
-      let count = 0;
-      data.steps = data.steps.map(s => {
-        if(s.state !== model.STEP_STATE.DONE || s.archived) return s;
-        if(s.kind === model.STEP_KIND.DAILY) return s;
-        count += 1;
-        return {...s, archived: true, archivedAt: at};
+      return mutate(() => {
+        const at = new Date().toISOString();
+        let count = 0;
+        data.steps = data.steps.map(s => {
+          if(s.state !== model.STEP_STATE.DONE || s.archived) return s;
+          if(s.kind === model.STEP_KIND.DAILY) return s;
+          count += 1;
+          return {...s, archived: true, archivedAt: at};
+        });
+        return count;
       });
-      commit();
-      return count;
     },
 
     deleteSteps(pred){
-      const before = data.steps.length;
-      data.steps = data.steps.filter(s => !pred(copyStep(s)));
-      commit();
-      return before - data.steps.length;
+      return mutate(() => {
+        const before = data.steps.length;
+        data.steps = data.steps.filter(s => !pred(copyStep(s)));
+        return before - data.steps.length;
+      });
     },
 
     // 完成即發放 XP（§4.2）。每日任務不進 DONE，改記 streak（§5.1）。
     // 收件匣是唯一沒有事先歸屬的 kind，完成時才要求指定核心（§4.3），
     // 沒指定就不完成——這個摩擦只發生在真的要記分的那一刻。
     completeStep(id, {coreId = null} = {}){
+      return mutate(() => {
       const i = findStep(id);
       let step = data.steps[i];
       if(step.kind === model.STEP_KIND.INBOX
@@ -639,10 +899,12 @@ export function createStore(backend = defaultBackend()){
                     completedAt: new Date().toISOString()};
       grantForStep(next, today);
       return replaceStep(i, next);
+      });
     },
 
     // 補登：把過去 3 天內的日期補進 streakHistory，XP 記在被補登的那一天（§5.1）
     backfillDaily(id, date){
+      return mutate(() => {
       const i = findStep(id);
       const step = data.steps[i];
       if(step.kind !== model.STEP_KIND.DAILY) throw new Error("只有每日任務可以補登");
@@ -651,48 +913,36 @@ export function createStore(backend = defaultBackend()){
         throw new Error(`只能補登過去 ${BACKFILL_DAYS} 天內的日期`);
       }
       return markDaily(i, day);
+      });
     },
 
-    deferStep(id){
-      const i = findStep(id);
-      return replaceStep(i, model.deferStep(data.steps[i]));
-    },
+    deferStep(id){return mutate(() => applyToStep(id, model.deferStep));},
 
-    reopenStep(id){
-      const i = findStep(id);
-      return replaceStep(i, model.reopenStep(data.steps[i]));
-    },
+    reopenStep(id){return mutate(() => applyToStep(id, model.reopenStep));},
 
-    noteStep(id){
-      const i = findStep(id);
-      return replaceStep(i, model.noteStep(data.steps[i]));
-    },
+    noteStep(id){return mutate(() => applyToStep(id, model.noteStep));},
 
-    dropStep(id){
-      const i = findStep(id);
-      return replaceStep(i, model.dropStep(data.steps[i]));
-    },
+    dropStep(id){return mutate(() => applyToStep(id, model.dropStep));},
 
-    scheduleStep(id, due){
-      const i = findStep(id);
-      return replaceStep(i, model.scheduleStep(data.steps[i], due));
-    },
+    scheduleStep(id, due){return mutate(() => applyToStep(id, model.scheduleStep, due));},
 
     // 收件匣項目歸入目標時轉成主線並排到最後，不插隊搶走現有的下一步。
     // 指派之後就不再是收件匣，因此歸屬必須當場成立：沿用該目標的 coreId，
     // 目標沒綁核心也沒有 rewards 時擋下來（§4.3）。
     assignStep(id, goalId){
-      const i = findStep(id);
-      if(goalId !== null) findGoal(goalId);
-      const kind = goalId === null ? model.STEP_KIND.INBOX : model.STEP_KIND.MAIN;
-      const step = model.createStep({
-        ...data.steps[i],
-        goalId,
-        kind,
-        order: model.nextOrder(data.steps.filter(s => s.id !== id), goalId),
+      return mutate(() => {
+        const i = findStep(id);
+        if(goalId !== null) findGoal(goalId);
+        const kind = goalId === null ? model.STEP_KIND.INBOX : model.STEP_KIND.MAIN;
+        const step = model.createStep({
+          ...data.steps[i],
+          goalId,
+          kind,
+          order: model.nextOrder(data.steps.filter(s => s.id !== id), goalId),
+        });
+        requireAttribution(step);
+        return replaceStep(i, step);
       });
-      requireAttribution(step);
-      return replaceStep(i, step);
     },
 
     // ── 手動調整（§4.4）─────────────────────────────────────────────────────
@@ -700,18 +950,19 @@ export function createStore(backend = defaultBackend()){
     // 技能 XP 不得低於 0：扣減量超過現有 XP 時只扣到 0，並以實際變動量記錄，
     // 這樣 xpLog 的加總永遠等於目前 XP。
     adjustSkillXp(skillId, delta){
-      const i = findSkill(skillId);
-      if(!Number.isSafeInteger(delta)) throw new Error("XP 變動量必須是整數");
-      const before = data.skills[i].xp;
-      const actual = Math.max(0, before + delta) - before;
-      // 什麼都沒變就不留紀錄，否則會在 activeDays 裡多出一個沒有活動的日子。
-      if(actual !== 0){
-        bumpSkill(skillId, actual);
-        addXpEntry({date: logicalToday(), skillId, xp: actual,
-                    source: model.XP_SOURCE.MANUAL});
-      }
-      commit();
-      return copySkill(data.skills[findSkill(skillId)]);
+      return mutate(() => {
+        const i = findSkill(skillId);
+        if(!Number.isSafeInteger(delta)) throw new Error("XP 變動量必須是整數");
+        const before = data.skills[i].xp;
+        const actual = Math.max(0, before + delta) - before;
+        // 什麼都沒變就不留紀錄，否則會在 activeDays 裡多出一個沒有活動的日子。
+        if(actual !== 0){
+          bumpSkill(skillId, actual);
+          addXpEntry({date: logicalToday(), skillId, xp: actual,
+                      source: model.XP_SOURCE.MANUAL});
+        }
+        return copySkill(data.skills[findSkill(skillId)]);
+      });
     },
 
     // 直接輸入目標值：寫入的是差額，不是新值本身。
@@ -726,6 +977,7 @@ export function createStore(backend = defaultBackend()){
     // 事後指定核心（§4.3.1）：更新那筆紀錄的 skillId，不新增一筆，
     // 否則同一次完成會被算兩次。
     assignXpEntry(entryId, coreId){
+      return mutate(() => {
       const i = data.xpLog.findIndex(e => e.id === entryId);
       if(i < 0) throw new Error(`找不到 xpLog：${entryId}`);
       const entry = data.xpLog[i];
@@ -737,8 +989,8 @@ export function createStore(backend = defaultBackend()){
       data.profile = {...data.profile,
                       unassignedXP: Math.max(0, data.profile.unassignedXP - entry.xp)};
       data.xpLog = data.xpLog.map((e, n) => (n === i ? {...e, skillId} : e));
-      commit();
       return copy(data.xpLog[i]);
+      });
     },
 
     // ── 合併技能（§4.5）─────────────────────────────────────────────────────
@@ -746,6 +998,7 @@ export function createStore(backend = defaultBackend()){
     // 既有 XP，寫進實際金額會讓當天的成果數字整批膨脹。
     mergeSkills({sourceIds = [], coreId, name, icon = "", desc = "", source = "",
                  type = model.SKILL_TYPE.ACTIVE, notes = []} = {}){
+      return mutate(() => {
       const ids = [...new Set(sourceIds)];
       const sources = ids.map(id => data.skills[findSkill(id)]);
       if(sources.length < 2) throw new Error("合併至少需要兩個技能");
@@ -781,8 +1034,8 @@ export function createStore(backend = defaultBackend()){
       });
       addXpEntry({date: logicalToday(), skillId: merged.id, xp: 0,
                   source: model.XP_SOURCE.MERGE, refId: merged.id});
-      commit();
       return copySkill(merged);
+      });
     },
 
     // ── 推導（轉呼叫 model，讓檢視只需要依賴 store）────────────────────────
@@ -820,6 +1073,7 @@ export function createStore(backend = defaultBackend()){
 
     // 反向投影。只覆寫 legacy 認得的那部分，Goal/Step 層的資料原封不動。
     saveLegacyState(state = {}){
+      return mutate(() => {
       if(typeof state.charName === "string" && state.charName.trim()){
         data.profile = model.createProfile({...data.profile, charName: state.charName});
       }
@@ -887,8 +1141,175 @@ export function createStore(backend = defaultBackend()){
           (g.coreId && !coreIds.has(g.coreId)) ? {...g, coreId: null} : g);
       }
 
-      commit();
       return store.getState();
+      });
+    },
+
+    // ── 今日計畫（planner, v3）──────────────────────────────────────────────
+    // 寫入一律走 transact()：候選狀態成功寫進去才採用，失敗時 data 原封不動，
+    // 呼叫端拿到 ok:false 就不能顯示「已保存」（§6.2）。
+    plannerState(){return copyPlanner(data.planner);},
+
+    // 班表 anchor 與目標綁定。已經有每日紀錄時改 anchor 會讓過去的原定班別整批
+    // 位移，所以只回報影響、保留原設定，要改必須明確帶 force（§3.2）。
+    setPlannerConfig(patch = {}){
+      const prev = data.planner.config;
+      let next;
+      try{
+        next = model.createPlannerConfig({
+          anchorDate: patch.anchorDate !== undefined ? patch.anchorDate : prev.anchorDate,
+          anchorPhase: patch.anchorPhase !== undefined ? patch.anchorPhase : prev.anchorPhase,
+          goalBindings: {...prev.goalBindings, ...(patch.goalBindings || {})},
+        });
+      }catch(err){ return {ok: false, reason: "invalid", message: err.message}; }
+      const anchorMoved = next.anchorDate !== prev.anchorDate
+        || next.anchorPhase !== prev.anchorPhase;
+      const dayCount = Object.keys(data.planner.days).length;
+      if(anchorMoved && dayCount > 0 && patch.force !== true){
+        return {ok: false, reason: "has-days", days: dayCount};
+      }
+      const out = transact(() => {data.planner.config = next;});
+      if(!out.ok) return out;
+      return {ok: true, config: {...next, goalBindings: {...next.goalBindings}}};
+    },
+
+    // 單日的安排、實際出勤、精力、時間與模式。
+    setDayPlan(date, patch = {}){
+      let key, day, prev;
+      try{
+        key = model.normalizeDue(date);
+        if(!key) throw new Error("要先指定日期");
+        // 未來只能規劃：確認實際出勤等於替還沒發生的事做紀錄（§3.1）。
+        if(patch.attendanceActual !== undefined && patch.attendanceActual !== null
+           && key > logicalToday()){
+          throw new Error("未來的日子只能規劃，不能確認實際出勤");
+        }
+        prev = data.planner.days[key] || model.createPlannerDay({});
+        day = model.createPlannerDay({...prev, ...patch,
+                                      updatedAt: new Date().toISOString()});
+      }catch(err){ return {ok: false, reason: "invalid", message: err.message}; }
+      const out = transact(() => {data.planner.days[key] = day;});
+      if(!out.ok) return out;
+      // 這次「想要的」本次時間：patch 沒帶就是原本已選的值。只調低可用時間
+      // 一樣會把它夾到上限，那時候也要讓使用者看得到，不能默默改掉（§4）。
+      const requested = patch.plannedMinutes !== undefined
+        ? patch.plannedMinutes : prev.plannedMinutes;
+      return {
+        ok: true,
+        day: {...day, focus: day.focus ? {...day.focus} : null},
+        clamped: Number.isSafeInteger(requested) && day.plannedMinutes !== requested,
+      };
+    },
+
+    // 接受今天的主線。未來不能接受：接受是「今天要做這個」的宣告（§3.1）。
+    // 本次時間跟 focus 一起落地：分兩次寫的話，第二次失敗會留下一個已接受但
+    // plannedMinutes 還是 null 的今天，之後改精力或班表就會默默改掉顯示的時間。
+    setDayFocus(date, {goalId, stepId, plannedMinutes, changeReason} = {}){
+      let key, day;
+      try{
+        key = model.normalizeDue(date);
+        if(!key) throw new Error("要先指定日期");
+        if(key > logicalToday()) throw new Error("未來的日子不能開始主線");
+        const goal = data.goals.find(g => g.id === goalId);
+        if(!goal) throw new Error("找不到這個目標");
+        if(goal.status !== model.GOAL_STATUS.ACTIVE) throw new Error("這個目標已經不在進行中");
+        const step = data.steps.find(s => s.id === stepId);
+        if(!step) throw new Error("找不到這個步驟");
+        if(step.goalId !== goal.id) throw new Error("這個步驟不屬於選定的目標");
+        if(step.archived || !model.isActionable(step.state)){
+          throw new Error("這個步驟已經不需要行動了");
+        }
+        const prev = data.planner.days[key] || model.createPlannerDay({});
+        day = model.createPlannerDay({
+          ...prev,
+          // 重新開始就不再是收工：模式跟著回到 active，並恢復原本的主線（§4）。
+          mode: model.DAY_MODE.ACTIVE,
+          plannedMinutes: plannedMinutes === undefined ? prev.plannedMinutes : plannedMinutes,
+          changeReason: changeReason === undefined ? prev.changeReason : changeReason,
+          focus: {goalId, stepId, acceptedAt: new Date().toISOString()},
+          updatedAt: new Date().toISOString(),
+        });
+      }catch(err){ return {ok: false, reason: "invalid", message: err.message}; }
+      const out = transact(() => {data.planner.days[key] = day;});
+      if(!out.ok) return out;
+      return {ok: true, day: {...day, focus: {...day.focus}}};
+    },
+
+    clearDayFocus(date){
+      let key, day;
+      try{
+        key = model.normalizeDue(date);
+        if(!key) throw new Error("要先指定日期");
+        const prev = data.planner.days[key] || model.createPlannerDay({});
+        day = model.createPlannerDay({...prev, focus: null,
+                                      updatedAt: new Date().toISOString()});
+      }catch(err){ return {ok: false, reason: "invalid", message: err.message}; }
+      const out = transact(() => {data.planner.days[key] = day;});
+      if(!out.ok) return out;
+      return {ok: true, day: {...day, focus: null}};
+    },
+
+    // 第一動作 / 最低入口 / 完成條件。這是使用者替既有 step 補的說明，
+    // 不是另建一個 step。
+    setStepDetail(stepId, patch = {}){
+      let detail;
+      try{
+        if(!data.steps.some(s => s.id === stepId)) throw new Error("找不到這個步驟");
+        const prev = data.planner.stepDetails[stepId] || model.createStepDetail({});
+        detail = model.createStepDetail({...prev, ...patch});
+      }catch(err){ return {ok: false, reason: "invalid", message: err.message}; }
+      const out = transact(() => {data.planner.stepDetails[stepId] = detail;});
+      if(!out.ok) return out;
+      return {ok: true, detail: {...detail}};
+    },
+
+    // 成果提交（§5）。保存進度不改 step.state、不發 XP；完整完成沿用既有的
+    // 完成路徑與獎勵，成果、step、XP、成就在同一次寫入中一起落地。
+    submitOutcome({requestId = null, stepId, outcome, note = "", nextAction = "",
+                   url = null, confirmed = false} = {}){
+      const today = logicalToday();
+      const rid = requestId || model.newId("req");
+      // 同一個 requestId 重送回傳原結果，不再寫第二筆（§6.2）。
+      const already = data.planner.entries.find(e => e.requestId === rid);
+      if(already) return {ok: true, duplicate: true, entry: {...already}};
+
+      let entry;
+      try{
+        const step = data.steps.find(s => s.id === stepId);
+        if(!step) throw new Error("找不到這個步驟");
+        if(step.kind === model.STEP_KIND.DAILY){
+          throw new Error("日常維持任務請在任務頁打卡");
+        }
+        // 完整完成要當次確認，不能只靠「按過完成」這個動作本身（§5）。
+        if(outcome === model.OUTCOME.COMPLETE && confirmed !== true){
+          throw new Error("要先確認完成條件已達成");
+        }
+        entry = model.createPlannerEntry({
+          requestId: rid, day: today, goalId: step.goalId, stepId, outcome,
+          note, nextAction, url, createdAt: new Date().toISOString(),
+        });
+      }catch(err){ return {ok: false, reason: "invalid", message: err.message}; }
+
+      const out = transact(() => {
+        const i = data.steps.findIndex(s => s.id === stepId);
+        const target = data.steps[i];
+        let completed = false;
+        let granted = [];
+        // 已經是完成狀態就不再發一次獎勵，換一個 requestId 也一樣（§6.2）。
+        if(outcome === model.OUTCOME.COMPLETE && target.state !== model.STEP_STATE.DONE){
+          const next = {...model.completeStep(target),
+                        completedAt: new Date().toISOString()};
+          granted = resolveGrants(next, {goals: data.goals, skills: data.skills});
+          data.steps = data.steps.map((s, n) => (n === i ? next : s));
+          grantForStep(next, today);
+          completed = true;
+        }
+        data.planner.entries = [...data.planner.entries, entry];
+        return {completed, granted};
+      });
+      if(!out.ok) return out;
+      return {ok: true, entry: {...entry}, requestId: rid,
+              completed: out.value.completed, granted: out.value.granted};
     },
 
     // ── 備份匯出 / 匯入 ─────────────────────────────────────────────────────
@@ -897,19 +1318,28 @@ export function createStore(backend = defaultBackend()){
     // 試算一份備份會轉出什麼，但不落地。匯入是破壞性的：現有資料被蓋掉之後
     // 才告訴使用者「有 N 筆沒進來」已經來不及了。
     inspect(raw){
+      if(isUnsupportedVersion(raw)){
+        return {...emptyReport(), total: 0, migrated: false, unsupported: true};
+      }
       const out = convert(raw);
-      return {...out.report, total: reportTotal(out.report), migrated: out.looksV1};
+      return {...out.report, total: reportTotal(out.report), migrated: out.looksV1,
+              unsupported: false};
     },
 
-    // v2 直接吃；認得出 v1 就走同一條遷移路徑（§7.4）
+    // v2 直接吃；認得出 v1 就走同一條遷移路徑（§7.4）。版本比這個 App 新時
+    // 一律拒收：降級匯入會把不認得的欄位靜默抹掉，跟覆寫一份新版存檔一樣。
     replaceAll(raw){
-      const out = convert(raw);
-      data = out.data;
-      report = out.report;
-      migrated = out.looksV1;
-      fresh = false;
-      commit();
-      return store.getState();
+      if(isUnsupportedVersion(raw)){
+        throw new Error("這份備份的版本比目前的 App 新，無法匯入，也不會覆蓋現有資料");
+      }
+      return mutate(() => {
+        const out = convert(raw);
+        data = out.data;
+        report = out.report;
+        migrated = out.looksV1;
+        fresh = false;
+        return store.getState();
+      });
     },
   };
 
