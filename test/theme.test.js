@@ -155,6 +155,17 @@ test("畫面用到的 var(--x) 都有定義", () => {
   assert.deepEqual(missing, [], `未定義的 token：${missing.join(", ")}`);
 });
 
+test("動態組出來的 token 也要有定義", () => {
+  // `var(--${tk}-22)` 這種靜態掃不到，token 名是執行時才拼出來的。把實際會出現
+  // 的組合列出來，漏定義一個色階就會在這裡被擋下來。
+  const defined = new Set([...html.matchAll(/--([a-z0-9-]+)\s*:/g)].map(x => x[1]));
+  const combos = [];
+  for(const base of ["amber", "cyan"]) for(const a of ["", "-18", "-22", "-44", "-66"]) combos.push(base + a);
+  for(const base of ["amber", "cyan", "blue"]) combos.push(base, base + "-22");
+  const missing = [...new Set(combos)].filter(k => !defined.has(k));
+  assert.deepEqual(missing, [], `動態 token 未定義：${missing.join(", ")}`);
+});
+
 test("開機腳本沒有跟 store 的 key 與 config 形狀漂移", () => {
   const boot = html.slice(html.indexOf("var pref=\"auto\";"), html.indexOf("})();"));
   const store = readFileSync(fileURLToPath(new URL("src/store.js", root)), "utf8");
@@ -170,4 +181,30 @@ test("開機腳本的淺色底色等於 token 定義的 --bg", () => {
   assert.ok(html.includes(`mode==="light"?"${lightBg}":"${darkBg}"`),
     "開機腳本寫死的 theme-color 跟 --bg 對不上");
   assert.equal(lightBg, theme.LIGHT_BG, "shade() 的對比基準要用同一個底色");
+});
+
+test("var(--x) 後面不接 alpha：接了整條宣告會被瀏覽器丟掉", () => {
+  // 兩種寫法都要擋：色值直接寫在樣板裡（`var(--amber)"}22`），以及先存進變數
+  // 再接（`const tc="var(--cyan)"` → `${tc}66`）。前者掃字串，後者先找出所有
+  // 持有 var() 字串的識別字，再回頭找它的用法。
+  const sources = {
+    "index.html": html,
+    ...Object.fromEntries(["views.js", "today-view.js"].map(f =>
+      [f, readFileSync(fileURLToPath(new URL(`src/${f}`, root)), "utf8")])),
+  };
+  const bad = [];
+  for(const [name, src] of Object.entries(sources)){
+    for(const mt of src.matchAll(/var\(--[a-z0-9-]+\)["'`}\s]{0,3}[0-9a-fA-F]{2}(?=[;"'`\s)])/g)){
+      bad.push(`${name}: ${mt[0]}`);
+    }
+    const holders = new Set();
+    for(const mt of src.matchAll(/(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*[^;\n]*var\(--/g)){
+      holders.add(mt[1]);
+    }
+    for(const id of holders){
+      const use = new RegExp(`\\$\\{${id}\\}[0-9a-fA-F]{2}|\\b${id}\\s*\\+\\s*["'\`][0-9a-fA-F]{2}["'\`]`, "g");
+      for(const mt of src.matchAll(use)) bad.push(`${name}: ${id} → ${mt[0]}`);
+    }
+  }
+  assert.deepEqual(bad, [], `var() 後面接了 alpha：${bad.join(" / ")}`);
 });

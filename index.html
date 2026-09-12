@@ -87,6 +87,7 @@
   --amber-77:color-mix(in srgb,var(--amber) 46.7%,transparent);
   --cyan-18:color-mix(in srgb,var(--cyan) 9.4%,transparent);
   --cyan-22:color-mix(in srgb,var(--cyan) 13.3%,transparent);
+  --cyan-44:color-mix(in srgb,var(--cyan) 26.7%,transparent);
   --cyan-55:color-mix(in srgb,var(--cyan) 33.3%,transparent);
   --cyan-66:color-mix(in srgb,var(--cyan) 40%,transparent);
   --purple-11:color-mix(in srgb,var(--purple) 6.7%,transparent);
@@ -753,14 +754,16 @@ function renderDetail(coreId){
   const subCards=subs.length===0
     ?`<div class="empty-state">尚未加入子技能<br><small>每個子技能的 EXP 都會累計到此核心技能</small></div>`
     :subs.map(s=>{
-      const tc=s.type==="active"?"var(--amber)":"var(--cyan)";
+      // 這裡存的是 token 名而不是色值。把 alpha 直接接在自訂屬性的引用後面不是
+      // 合法的 CSS，整條宣告會被瀏覽器丟掉；要疊透明度就引用對應的色階 token。
+      const tk=s.type==="active"?"amber":"cyan";
       const ti=s.type==="active"?"⚡":"🛡️";
       const tl=s.type==="active"?"主動":"被動";
       const subLv=Math.min(calcLv(s.xp),SUB_MAX_LV);
       const pct2=subLv<SUB_MAX_LV?lvProgress(s.xp).pct:100;
       const quickBtn=s.type==="active"
         ?`<button onclick="event.stopPropagation();quickAddXP('${s.id}')"
-            style="flex-shrink:0;background:${tc}22;border:1px solid ${tc}66;color:${tc};
+            style="flex-shrink:0;background:var(--${tk}-22);border:1px solid var(--${tk}-66);color:var(--${tk});
             border-radius:8px;padding:6px 10px;cursor:pointer;font-size:12px;font-weight:700;
             font-family:'Cinzel',serif;line-height:1">+10</button>`
         :"";
@@ -772,7 +775,7 @@ function renderDetail(coreId){
               <span class="sub-name">${esc(s.name)} <span style="color:${col};font-size:11px;font-family:'Cinzel',serif">Lv${subLv}</span></span>
               <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
                 ${quickBtn}
-                <span class="type-badge" style="color:${tc};background:${tc}18;border:1px solid ${tc}44">${ti} ${tl}</span>
+                <span class="type-badge" style="color:var(--${tk});background:var(--${tk}-18);border:1px solid var(--${tk}-44)">${ti} ${tl}</span>
               </div>
             </div>
             <div class="sub-desc">${esc(s.desc||"")}</div>
@@ -1810,6 +1813,9 @@ function esc(v){return window.Goals.esc(v);}
 function cssColor(v){return window.Goals.themeColor(v);}
 
 function stepMeta(s){return KIND_META[s.kind]||KIND_META.side;}
+// 任務篩選 tab 的強調色。回傳 token 名，由呼叫端組出基色或色階的引用——alpha
+// 不能接在自訂屬性的引用後面，那不是合法的 CSS。
+function qtabToken(k){return k==="archive"?"amber":k==="done"?"cyan":"blue";}
 function isActionableStep(s){return !s.archived&&ACTIONABLE_STATES.has(s.state);}
 function isDailyDoneToday(s){
   return s.kind==="daily"&&s.lastCompletedDate===todayStr();
@@ -1870,7 +1876,7 @@ function renderQuests(){
     {k:"done",    label:`✓ 完成 (${counts.done})`},
     {k:"archive", label:`📦 封存 (${counts.archive})`},
   ].map(t=>`<button class="qtab ${questFilter===t.k?"active":""}"
-    style="${questFilter===t.k?`background:${t.k==="archive"?"var(--amber)":t.k==="done"?"var(--cyan)":"var(--blue)"}22;border-color:${t.k==="archive"?"var(--amber)":t.k==="done"?"var(--cyan)":"var(--blue)"};color:${t.k==="archive"?"var(--amber)":t.k==="done"?"var(--cyan)":"var(--blue)"}`:""}"
+    style="${questFilter===t.k?`background:var(--${qtabToken(t.k)}-22);border-color:var(--${qtabToken(t.k)});color:var(--${qtabToken(t.k)})`:""}"
     onclick="questFilter='${t.k}';render()">${t.label}</button>`).join("");
 
   let cards="";
@@ -2146,7 +2152,7 @@ function showQuestModal(s){
       <div class="type-toggle" style="margin-bottom:14px">
         ${Object.entries(KIND_META).map(([k,t])=>`
           <button id="qtype-${k}" class="type-btn"
-            style="${kind===k?`background:${t.color}22;border-color:${t.color};color:${t.color}`:""}"
+            style="${kind===k?(c=>`background:${c}22;border-color:${c};color:${c}`)(cssColor(t.color)):""}"
             onclick="selectQType('${k}')">${t.icon} ${t.label.replace("任務","")}</button>`).join("")}
       </div>
       <input type="hidden" id="q-type" value="${kind}"/>
