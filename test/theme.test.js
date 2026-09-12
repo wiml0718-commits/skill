@@ -208,3 +208,45 @@ test("var(--x) 後面不接 alpha：接了整條宣告會被瀏覽器丟掉", ()
   }
   assert.deepEqual(bad, [], `var() 後面接了 alpha：${bad.join(" / ")}`);
 });
+
+test("匯入備份後會重新套用主題，不會停在舊的那一套", async () => {
+  // views.js 在模組層就建好 store 與 api，所以要在 import 之前把 window 立好。
+  // 只需要 refreshTheme 會碰到的那幾個東西。
+  const store = new Map();
+  const attrs = {};
+  const meta = {content: "", setAttribute(k, v){ this.content = v; }};
+  globalThis.window = {
+    document: {
+      documentElement: {setAttribute: (k, v) => {attrs[k] = v;}},
+      getElementById: () => null,
+      querySelector: sel => (sel.includes("theme-color") ? meta : null),
+    },
+    getComputedStyle: () => ({getPropertyValue: () => "#f5f2ea"}),
+    localStorage: {
+      getItem: k => (store.has(k) ? store.get(k) : null),
+      setItem: (k, v) => {store.set(k, String(v));},
+    },
+    matchMedia: () => ({matches: false, addEventListener(){}, removeEventListener(){}}),
+  };
+  globalThis.localStorage = window.localStorage;
+  globalThis.document = window.document;
+
+  const views = await import("../src/views.js");
+  const api = views.install();
+  assert.equal(attrs["data-theme"], "dark", "預設偏好 auto ＋ 系統深色");
+
+  api.setTheme("light");
+  assert.equal(attrs["data-theme"], "light");
+
+  // 一份明確指定深色的 v2 備份
+  api.importPayload({
+    version: 3, cores: [], skills: [], goals: [], steps: [],
+    planner: {version: 1, config: {theme: "dark", goalBindings: {}}, days: {}, stepDetails: {}, entries: []},
+  });
+  assert.equal(api.themePref(), "dark", "匯入的偏好要進 store");
+  assert.equal(attrs["data-theme"], "dark", "套用的主題要跟著匯入的偏好走");
+  assert.equal(api.themeMode(), "dark", "快取的 themeMode 也要更新");
+  assert.equal(api.themeColor("#f59e0b"), "#f59e0b", "深色模式不壓資料色");
+
+  delete globalThis.window; delete globalThis.localStorage; delete globalThis.document;
+});

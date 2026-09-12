@@ -568,7 +568,11 @@ const api = {
 
   // 與既有的備份匯出 / 匯入串接
   exportPayload(){return store.toJSON();},
-  importPayload(data){store.replaceAll(data);},
+  // 匯入會把整份 store 換掉，其中包含主題偏好。不重新套用的話，設定頁顯示的是
+  // 匯入進來的值，但 <html data-theme>、狀態列顏色與這裡快取的 themeMode 都還停在
+  // 舊的那一套，資料色也會被用錯的模式壓亮度，直到使用者自己切一次或重開。
+  // 放在這裡而不是呼叫端：換掉 store 的是這個函式，補救就該跟它綁在一起。
+  importPayload(data){store.replaceAll(data); refreshTheme();},
   inspectPayload(data){return store.inspect(data);},
 
   // index.html 的內嵌 script 仍以 legacy 形狀工作，透過這兩個方法讀寫 store，

@@ -62,7 +62,7 @@
 
 ## 5. 驗證紀錄
 
-`test/theme.test.js`（15 項）與 `test/offline.test.js`（6 項）跑靜態與邏輯層。
+`test/theme.test.js`（18 項）與 `test/offline.test.js`（6 項）跑靜態與邏輯層。
 畫面與離線行為另外用無頭 Chromium 驗過，結果如下。
 
 **A22 淺色主題 — PASS**
