@@ -61,9 +61,21 @@
 
 對話框掛在 `document.body` 上，不在 `#content` 裡。系統主題在對話框開著時變動，
 只重畫 `#content` 會讓它留著開啟當下算出來的色碼，所以 `window.rerender` 連
-`repaintModal()` 一起跑。重畫前後會把使用者填到一半的輸入帶回去——主題變了就
-清空輸入，比顏色不對更糟。每個開啟對話框的路徑都要設 `_modalRepaint`，
-`test/theme.test.js` 會檢查有沒有漏。
+`repaintModal()` 一起跑。主題變了就清空正在編輯的內容，比顏色不對更糟，所以
+重畫會把使用者改到一半的東西帶回去，兩種都要顧：
+
+- **DOM 裡的輸入**（`input`／`textarea`／`select`，checkbox 用 `checked`）由
+  `repaintModal()` 依 id 快照與還原。沒有 id 的輸入不在範圍內，所以合併清單的
+  勾選也給了 id。
+- **模組層的編輯狀態**（`_modalRewards`、`_mergeType`／`_mergeCoreId`、
+  `_pickedColor`）不在快照裡，只能由開啟路徑自己在重畫時不要重設——重畫會帶
+  `keepState`。漏掉的話按儲存會把重設後的值真的寫進去。
+
+重畫等於「再跑一次開啟路徑」，所以每條路徑都必須**先移除舊的那一份**，否則會疊出
+第二個 id 相同的對話框，之後靠 id 找元素的動作全部打到錯的那一份。
+
+每個開啟對話框的路徑都要設 `_modalRepaint`，`test/theme.test.js` 會檢查有沒有漏，
+也會檢查先移除與 `keepState` 這兩件事。
 
 模組載入是非同步的，等 `views.js` 才設 `data-theme` 的話，偏好淺色的人會先看到
 一閃的深色畫面。`<head>` 裡有一段同步腳本先把主題套上。
@@ -73,7 +85,7 @@
 
 ## 5. 驗證紀錄
 
-`test/theme.test.js`（21 項）與 `test/offline.test.js`（6 項）跑靜態與邏輯層。
+`test/theme.test.js`（22 項）與 `test/offline.test.js`（6 項）跑靜態與邏輯層。
 畫面與離線行為另外用無頭 Chromium 驗過，結果如下。
 
 **A22 淺色主題 — PASS**

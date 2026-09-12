@@ -261,6 +261,29 @@ test("每個開啟對話框的路徑都記下自己的重畫方式，主題變�
   assert.deepEqual(missing, [], `沒有設定 _modalRepaint 的開啟路徑：${missing.join(", ")}`);
   assert.match(html, /window\.rerender\s*=\s*\(\)\s*=>\s*\{\s*render\(\);\s*repaintModal\(\);\s*\}/,
     "主題變動的重畫沒有帶上 repaintModal()");
+
+  // 重畫是「再跑一次開啟路徑」，所以每條路徑都必須先把舊的那份移除。少一個就會
+  // 疊出第二個 id 相同的對話框，之後靠 id 找元素的動作全部打到錯的那一份。
+  const stacking = openers.filter(([, body]) => {
+    const own = body.match(/overlay\.id\s*=\s*["']([^"']+)["']/);
+    if(!own) return false;
+    return !new RegExp(`getElementById\\(["']${own[1]}["']\\)`).test(body);
+  }).map(([n]) => n);
+  assert.deepEqual(stacking, [], `沒有先移除舊對話框的開啟路徑：${stacking.join(", ")}`);
+});
+
+test("重畫對話框不會把模組層的編輯狀態重設掉", () => {
+  // 輸入框靠 repaintModal() 的快照接住，但存在模組層的編輯狀態（獎勵清單、
+  // 合併的類型與歸屬）不在快照裡，只能由開啟路徑自己在重畫時不要重設。
+  assert.match(html, /function showQuestModal\(s, keepState\)/);
+  assert.match(html, /if\(!keepState\)_modalRewards\s*=/,
+    "_modalRewards 在重畫時會被重設回存檔的舊值");
+  assert.match(html, /_modalRepaint\s*=\s*\(\)\s*=>\s*showQuestModal\(s,\s*true\)/);
+  assert.match(html, /function openMergeSub\(coreId, keepState\)/);
+  assert.match(html, /setMergeType\(keepState&&window\._mergeType/);
+  assert.match(html, /setMergeCore\(keepState&&window\._mergeCoreId/);
+  // 合併清單的勾選要有 id，否則不在快照的範圍內
+  assert.match(html, /<input type="checkbox" id="merge-pick-\$\{esc\(s\.id\)\}"/);
 });
 
 test("匯入備份後會重新套用主題，不會停在舊的那一套", async () => {

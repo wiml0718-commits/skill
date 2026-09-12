@@ -1297,8 +1297,11 @@ function editSub(id){
   renderModal();
 }
 // ── Merge Sub Skills ──────────────────────────────────────────────────────────
-function openMergeSub(coreId){
-  _modalRepaint=()=>openMergeSub(coreId);
+// 和其他開啟路徑一樣，先把舊的那份移除再掛新的：少了這一步，重畫會疊出第二個
+// id 相同的對話框，之後所有靠 id 找元素的動作（含關閉）都會打到下面那一份。
+function openMergeSub(coreId, keepState){
+  _modalRepaint=()=>openMergeSub(coreId, true);
+  const stale=document.getElementById("merge-overlay");if(stale)stale.remove();
   const subs=state.subSkills.filter(s=>s.coreId===coreId);
   const overlay=document.createElement("div");
   overlay.className="modal-overlay";overlay.id="merge-overlay";
@@ -1317,7 +1320,7 @@ function openMergeSub(coreId){
         ${subs.map(s=>`
           <label style="display:flex;align-items:center;gap:8px;padding:8px 10px;
             background:var(--bg);border:1px solid var(--border2);border-radius:8px;cursor:pointer">
-            <input type="checkbox" value="${esc(s.id)}" style="accent-color:var(--purple);width:16px;height:16px"/>
+            <input type="checkbox" id="merge-pick-${esc(s.id)}" value="${esc(s.id)}" style="accent-color:var(--purple);width:16px;height:16px"/>
             <span style="font-size:13px">${esc(s.icon||"⭐")} ${esc(s.name)}</span>
             <span style="margin-left:auto;font-size:10px;color:var(--purple);font-family:'Cinzel',serif">EXP ${s.xp||0}</span>
           </label>`).join("")}
@@ -1374,9 +1377,9 @@ function openMergeSub(coreId){
   });
 
   document.body.appendChild(overlay);
-  // Set default state
-  window._mergeType="active";
-  window._mergeCoreId=coreId;
+  // 重畫時沿用使用者已經選的類型與歸屬；第一次開啟才用預設值。
+  setMergeType(keepState&&window._mergeType?window._mergeType:"active");
+  setMergeCore(keepState&&window._mergeCoreId?window._mergeCoreId:coreId);
 }
 
 function setMergeType(t){
@@ -1683,8 +1686,10 @@ function deleteCore(coreId){
   showToast("已刪除核心技能");
 }
 
+// 選到的顏色存在模組層的 _pickedColor，重畫後值還在，但色票上的選取框會回到
+// 第一個，所以重畫完要重新標一次。
 function openAddCore(){
-  _modalRepaint=openAddCore;
+  _modalRepaint=()=>{openAddCore();pickColor(_pickedColor);};
   const existing=document.getElementById("modal");if(existing)existing.remove();
   const overlay=document.createElement("div");
   overlay.id="modal";overlay.className="modal-overlay";
@@ -1828,6 +1833,8 @@ function repaintModal(){
     if(!el)continue;
     if(el.type==="checkbox")el.checked=v; else el.value=v;
   }
+  // 勾選是即時預覽的輸入來源，還原之後要重算一次，否則預覽會停在重畫前的空狀態。
+  if(now.id==="merge-overlay"&&typeof updateMergePreview==="function")updateMergePreview();
 }
 
 // 使用者輸入會被塞進 innerHTML，一律先跳脫。匯入的備份也可能帶進標記，
@@ -2161,11 +2168,14 @@ function openEditQuest(id){
 let _editingQuest=null;
 let _modalRewards=[];
 
-function showQuestModal(s){
-  _modalRepaint=()=>showQuestModal(s);
+// keepState 是「重畫自己」時才會帶的：獎勵清單存在模組層的 _modalRewards，
+// 不在 repaintModal() 的輸入快照裡，照原本的初始化會把使用者加減過的獎勵
+// 整批換回存檔裡的舊值，而且之後按儲存會把重設後的清單真的寫進去。
+function showQuestModal(s, keepState){
+  _modalRepaint=()=>showQuestModal(s, true);
   const existing=document.getElementById("modal");if(existing)existing.remove();
   const isNew=!s;
-  _modalRewards=s?s.rewards.map(r=>({...r})):[];
+  if(!keepState)_modalRewards=s?s.rewards.map(r=>({...r})):[];
   const kind=s?.kind||"main";
 
   const overlay=document.createElement("div");
@@ -2234,6 +2244,7 @@ function showQuestModal(s){
     </div>`;
   document.body.appendChild(overlay);
   renderRewardList();
+  if(keepState)refreshSkillSelect();
 }
 
 function renderRewardList(){
