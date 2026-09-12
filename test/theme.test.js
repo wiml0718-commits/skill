@@ -259,8 +259,8 @@ test("每個開啟對話框的路徑都記下自己的重畫方式，主題變�
   assert.ok(openers.length >= 4, `找不到足夠的對話框開啟路徑（${openers.length}）`);
   const missing = openers.filter(([, body]) => !/_modalRepaint\s*=/.test(body)).map(([n]) => n);
   assert.deepEqual(missing, [], `沒有設定 _modalRepaint 的開啟路徑：${missing.join(", ")}`);
-  assert.match(html, /window\.rerender\s*=\s*\(\)\s*=>\s*\{\s*render\(\);\s*repaintModal\(\);\s*\}/,
-    "主題變動的重畫沒有帶上 repaintModal()");
+  assert.match(html, /window\.rerender\s*=\s*\(\)\s*=>\s*\{\s*renderKeepingInputs\(\);\s*repaintModal\(\);\s*\}/,
+    "主題變動的重畫沒有帶上 repaintModal()，或沒有保留 #content 的輸入");
 
   // 重畫是「再跑一次開啟路徑」，所以每條路徑都必須先把舊的那份移除。少一個就會
   // 疊出第二個 id 相同的對話框，之後靠 id 找元素的動作全部打到錯的那一份。
@@ -284,6 +284,15 @@ test("重畫對話框不會把模組層的編輯狀態重設掉", () => {
   assert.match(html, /setMergeCore\(keepState&&window\._mergeCoreId/);
   // 合併清單的勾選要有 id，否則不在快照的範圍內
   assert.match(html, /<input type="checkbox" id="merge-pick-\$\{esc\(s\.id\)\}"/);
+
+  // 還原值之後，可見狀態是另外畫的那些要再跑一次自己的更新函式，否則畫面顯示
+  // 舊的選擇、按儲存卻存進還原後的值。
+  assert.match(html, /selectQType\(qType\.value\)/, "q-type 還原後沒有重跑類型按鈕的更新");
+  assert.match(html, /updateMergePreview\(\)/);
+
+  // 主題選擇器旁邊就是還沒按儲存的角色名稱：換主題不能把它洗掉。
+  assert.match(html, /function setTheme\(pref\)[\s\S]{0,400}renderKeepingInputs\(\)/,
+    "setTheme 直接 render()，會丟掉 #content 裡打到一半的輸入");
 });
 
 test("匯入備份後會重新套用主題，不會停在舊的那一套", async () => {

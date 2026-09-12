@@ -1131,7 +1131,8 @@ function themePref(){return window.Goals.themePref();}
 function setTheme(pref){
   const out=window.Goals.setTheme(pref);
   if(!out.ok){showToast("⚠ 主題沒能保存",2500);return;}
-  render();
+  // 主題選擇器就在檔案頁，旁邊的角色名稱可能正打到一半還沒按儲存。
+  renderKeepingInputs();
   showToast("✓ 已儲存");
 }
 
@@ -1818,22 +1819,44 @@ let questFilter = "all"; // all | main | side | daily | inbox | done | archive
 // 開著時 repaintModal() 會自己清掉。只有主題變動會用到。
 let _modalRepaint=null;
 
+// 重畫任何一塊畫面之前先把使用者填到一半的輸入記下來，畫完再放回去。主題換了
+// 就清空正在編輯的內容，比顏色不對更糟。只認得有 id 的輸入。
+function snapshotInputs(root){
+  if(!root)return [];
+  return [...root.querySelectorAll("input,textarea,select")]
+    .filter(el=>el.id)
+    .map(el=>[el.id, el.type==="checkbox"?el.checked:el.value]);
+}
+function restoreInputs(root, keep){
+  if(!root)return;
+  for(const [id,v] of keep){
+    const el=root.querySelector("#"+CSS.escape(id));
+    if(!el)continue;
+    if(el.type==="checkbox")el.checked=v; else el.value=v;
+  }
+}
+
+// 主題變動時重畫主內容。#content 裡也有還沒按儲存的輸入（角色名稱、收件匣的
+// 捕捉框），直接 render() 會把它們換回存檔裡的舊值。
+function renderKeepingInputs(){
+  const keep=snapshotInputs(document.getElementById("content"));
+  render();
+  restoreInputs(document.getElementById("content"), keep);
+}
+
 function repaintModal(){
   const open=document.querySelector(".modal-overlay");
   if(!open){_modalRepaint=null;return;}
   if(typeof _modalRepaint!=="function")return;
-  const keep=[...open.querySelectorAll("input,textarea,select")]
-    .filter(el=>el.id)
-    .map(el=>[el.id, el.type==="checkbox"?el.checked:el.value]);
+  const keep=snapshotInputs(open);
   _modalRepaint();
   const now=document.querySelector(".modal-overlay");
   if(!now)return;
-  for(const [id,v] of keep){
-    const el=now.querySelector("#"+CSS.escape(id));
-    if(!el)continue;
-    if(el.type==="checkbox")el.checked=v; else el.value=v;
-  }
-  // 勾選是即時預覽的輸入來源，還原之後要重算一次，否則預覽會停在重畫前的空狀態。
+  restoreInputs(now, keep);
+  // 有些輸入的可見狀態是另外畫的，還原值不會連帶更新，要再跑一次它的更新函式：
+  // 少了這一步，畫面顯示的是舊的選擇，按儲存存進去的卻是還原後的值。
+  const qType=now.querySelector("#q-type");
+  if(qType&&typeof selectQType==="function")selectQType(qType.value);
   if(now.id==="merge-overlay"&&typeof updateMergePreview==="function")updateMergePreview();
 }
 
@@ -2527,7 +2550,7 @@ window.leaveToday=leaveToday;
 // 對話框掛在 document.body 上，不在 #content 裡，只重畫 #content 的話它會留著
 // 開啟當下算出來的深色色碼。所以連開著的對話框一起重畫，並且把使用者填到一半
 // 的內容帶回去——主題變了就清空輸入，比顏色不對更糟。
-window.rerender=()=>{render();repaintModal();};
+window.rerender=()=>{renderKeepingInputs();repaintModal();};
 
 // 模組沒載入就沒有資料層。顯示一份空白的預設資料會讓人以為資料不見了，
 // 不如直接說清楚原因。

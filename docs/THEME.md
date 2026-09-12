@@ -65,8 +65,14 @@
 重畫會把使用者改到一半的東西帶回去，兩種都要顧：
 
 - **DOM 裡的輸入**（`input`／`textarea`／`select`，checkbox 用 `checked`）由
-  `repaintModal()` 依 id 快照與還原。沒有 id 的輸入不在範圍內，所以合併清單的
-  勾選也給了 id。
+  `snapshotInputs()`／`restoreInputs()` 依 id 快照與還原。沒有 id 的輸入不在
+  範圍內，所以合併清單的勾選也給了 id。`#content` 也一樣會被重畫，所以走
+  `renderKeepingInputs()`——還沒按儲存的角色名稱、收件匣的捕捉框都在裡面。
+  透過設定頁按鈕換主題（`setTheme()`）與系統主題變動兩條路都用它。
+- **可見狀態另外畫的輸入**：還原值不會連帶更新畫面。`#q-type` 是隱藏欄位、
+  選中的類型按鈕是另外標的，所以還原後要再跑一次 `selectQType()`；合併清單的
+  勾選要再跑一次 `updateMergePreview()`。少了這一步，畫面顯示舊的選擇、按儲存
+  存進去的卻是還原後的值。
 - **模組層的編輯狀態**（`_modalRewards`、`_mergeType`／`_mergeCoreId`、
   `_pickedColor`）不在快照裡，只能由開啟路徑自己在重畫時不要重設——重畫會帶
   `keepState`。漏掉的話按儲存會把重設後的值真的寫進去。
