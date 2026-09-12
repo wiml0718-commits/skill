@@ -66,14 +66,42 @@ function contrast(a, b){
 const DATA_COLORS = ["#ef4444", "#22d3ee", "#a855f7", "#6366f1", "#f59e0b", "#ec4899",
                      "#10b981", "#84cc16", "#f97316", "#3b82f6", "#e879f9", "#facc15"];
 
-test("shade：深色模式原樣退回，淺色模式壓到對得起 4.5:1", () => {
+// 淺色主題所有會當背景的表面。資料色與語意色都可能落在其中任何一個上面，
+// 所以對比要對每一個都成立，不是只對頁面底色。
+function lightSurfaces(){
+  const block = blockAfter(':root[data-theme="light"]{');
+  return ["bg", "bg2", "bg3", "bg-nav", "bg-sheet"]
+    .map(k => block.match(new RegExp(`--${k}:(#[0-9a-f]{6});`))[1]);
+}
+
+test("shade：深色模式原樣退回，淺色模式在每一種淺色表面上都過 4.5:1", () => {
+  const surfaces = lightSurfaces();
+  assert.ok(surfaces.includes(theme.LIGHT_SURFACE), "基準表面要真的是淺色 token 之一");
   for(const c of DATA_COLORS){
     assert.equal(theme.shade(c, "dark"), c);
     const light = theme.shade(c, "light");
     assert.match(light, /^#[0-9a-f]{6}$/);
-    assert.ok(contrast(light, theme.LIGHT_BG) >= 4.45,
-      `${c} → ${light} 對 ${theme.LIGHT_BG} 只有 ${contrast(light, theme.LIGHT_BG).toFixed(2)}:1`);
+    for(const bg of surfaces){
+      assert.ok(contrast(light, bg) >= 4.45,
+        `${c} → ${light} 對 ${bg} 只有 ${contrast(light, bg).toFixed(2)}:1`);
+    }
   }
+});
+
+test("淺色的語意色與文字色在最深的表面上也要過 4.5:1", () => {
+  // 這些是寫死的 token，不會經過 shade()，但用途一樣是文字，所以同一條線。
+  const block = blockAfter(':root[data-theme="light"]{');
+  const keys = ["blue", "amber", "cyan", "purple", "red", "green", "orange", "pink",
+                "text", "text2", "text3", "muted", "muted2"];
+  const bad = [];
+  for(const k of keys){
+    const v = block.match(new RegExp(`--${k}:(#[0-9a-f]{6});`))[1];
+    for(const bg of lightSurfaces()){
+      const r = contrast(v, bg);
+      if(r < 4.45) bad.push(`--${k} ${v} on ${bg} = ${r.toFixed(2)}`);
+    }
+  }
+  assert.deepEqual(bad, [], bad.join(" / "));
 });
 
 test("shade：本來就夠暗的顏色不再壓，壞格式原樣退回", () => {
@@ -180,7 +208,15 @@ test("開機腳本的淺色底色等於 token 定義的 --bg", () => {
   const darkBg = blockAfter("\n:root{\n  color-scheme:dark;").match(/--bg:(#[0-9a-f]{6});/)[1];
   assert.ok(html.includes(`mode==="light"?"${lightBg}":"${darkBg}"`),
     "開機腳本寫死的 theme-color 跟 --bg 對不上");
-  assert.equal(lightBg, theme.LIGHT_BG, "shade() 的對比基準要用同一個底色");
+});
+
+test("shade() 的基準是最深的淺色表面，不是頁面底色", () => {
+  const block = blockAfter(':root[data-theme="light"]{');
+  const bg3 = block.match(/--bg3:(#[0-9a-f]{6});/)[1];
+  assert.equal(theme.LIGHT_SURFACE, bg3, "基準要跟著 --bg3 走");
+  const darkest = lightSurfaces()
+    .reduce((a, b) => (theme.relativeLuminance(a) <= theme.relativeLuminance(b) ? a : b));
+  assert.equal(theme.LIGHT_SURFACE, darkest, "--bg3 不再是最深的表面時要重挑基準");
 });
 
 test("var(--x) 後面不接 alpha：接了整條宣告會被瀏覽器丟掉", () => {
@@ -207,6 +243,24 @@ test("var(--x) 後面不接 alpha：接了整條宣告會被瀏覽器丟掉", ()
     }
   }
   assert.deepEqual(bad, [], `var() 後面接了 alpha：${bad.join(" / ")}`);
+});
+
+test("每個開啟對話框的路徑都記下自己的重畫方式，主題變動才追得到", () => {
+  // 對話框掛在 document.body 上，不在 #content 裡；只重畫 #content 的話它會留著
+  // 開啟當下算出來的色碼。這條擋的是「新增了一個對話框卻忘了設 _modalRepaint」。
+  // 以頂層 function 邊界切開，取完整的函式本體——用單一 regex 抓整個函式會被
+  // 巢狀的大括號騙過去，長一點的函式就整個漏掉。
+  const marks = [...html.matchAll(/\nfunction\s+([A-Za-z_$][\w$]*)\s*\(/g)];
+  const bodies = marks.map((mt, i) => [mt[1],
+    html.slice(mt.index, i + 1 < marks.length ? marks[i + 1].index : html.length)]);
+  const openers = bodies.filter(([, body]) =>
+    /overlay\.className\s*=\s*"modal-overlay"|class="modal-overlay"/.test(body)
+    && /appendChild\(overlay\)/.test(body));
+  assert.ok(openers.length >= 4, `找不到足夠的對話框開啟路徑（${openers.length}）`);
+  const missing = openers.filter(([, body]) => !/_modalRepaint\s*=/.test(body)).map(([n]) => n);
+  assert.deepEqual(missing, [], `沒有設定 _modalRepaint 的開啟路徑：${missing.join(", ")}`);
+  assert.match(html, /window\.rerender\s*=\s*\(\)\s*=>\s*\{\s*render\(\);\s*repaintModal\(\);\s*\}/,
+    "主題變動的重畫沒有帶上 repaintModal()");
 });
 
 test("匯入備份後會重新套用主題，不會停在舊的那一套", async () => {

@@ -36,6 +36,8 @@
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
 /* ── 主題 token ──────────────────────────────────────────────────────────
    深色是預設值；淺色只覆寫同一組名字，其餘規則不必知道現在是哪一套。
+   淺色的語意色以 --bg3（資料色與文字會落在的最深表面）為基準挑，不是頁面
+   底色 --bg：拿 --bg 當基準的話，卡片與統計區塊上的對比會掉到 4.5:1 以下。
    實際套用的模式由 src/theme.js 寫進 <html data-theme>，一律是已解析的
    light／dark，不會留 auto。 */
 :root{
@@ -58,11 +60,11 @@
   --bg-nav:#e8e3d5;--bg-sheet:#f0ece1;--border:#cdc3ac;
   --border2:#b3a88c;--border3:#8a7d62;--text:#241d12;
   --text2:#3f4b59;--text3:#34404d;--muted:#5f5849;
-  --muted2:#746d5d;--scrim:rgba(20,16,8,.45);--on-accent:#fff;
+  --muted2:#676152;--scrim:rgba(20,16,8,.45);--on-accent:#fff;
   --danger-bg:#f8e7e4;--warn-bg:#f8f0d9;--focus-wash:#c8a23a26;
-  --blue:#1565c0;--amber:#9b6204;--cyan:#0f7a8a;
-  --purple:#7127c8;--red:#c0281f;--green:#0a6c4d;
-  --orange:#a8480a;--pink:#b4246e;
+  --blue:#1460b8;--amber:#895603;--cyan:#0c6b79;
+  --purple:#7127c8;--red:#ba271e;--green:#0a6c4d;
+  --orange:#a24509;--pink:#b4246e;
 }
 /* 透明度階層由基色推導，因此只需要定義一次：基色換了色階自動跟著換。
    名字沿用原本的十六進位 alpha（--blue-22 等於舊的 #4a9eff22）。 */
@@ -1069,6 +1071,7 @@ function renderReview(){
 // ── 每日結算（§5.3）──────────────────────────────────────────────────────────
 // 當天首次開啟才顯示前一天的摘要；看過就寫 meta，同一天不會再跳第二次。
 function showDailySummary(){
+  _modalRepaint=showDailySummary;
   if(!window.Goals||!window.Goals.pendingDailySummary)return;
   let s=null;
   try{ s=window.Goals.pendingDailySummary(); }catch(err){ console.error(err); return; }
@@ -1295,6 +1298,7 @@ function editSub(id){
 }
 // ── Merge Sub Skills ──────────────────────────────────────────────────────────
 function openMergeSub(coreId){
+  _modalRepaint=()=>openMergeSub(coreId);
   const subs=state.subSkills.filter(s=>s.coreId===coreId);
   const overlay=document.createElement("div");
   overlay.className="modal-overlay";overlay.id="merge-overlay";
@@ -1495,6 +1499,7 @@ function closeModal(){
 }
 
 function renderModal(){
+  _modalRepaint=renderModal;
   const existing=document.getElementById("modal");if(existing)existing.remove();
   const d=modalData.data;
   const c=CORE_MAP[d.coreId];
@@ -1679,6 +1684,7 @@ function deleteCore(coreId){
 }
 
 function openAddCore(){
+  _modalRepaint=openAddCore;
   const existing=document.getElementById("modal");if(existing)existing.remove();
   const overlay=document.createElement("div");
   overlay.id="modal";overlay.className="modal-overlay";
@@ -1802,6 +1808,27 @@ const DONE_STATE = "×";
 const ACTIONABLE_STATES = new Set(["•", "<", ">"]);
 
 let questFilter = "all"; // all | main | side | daily | inbox | done | archive
+
+// 目前開著的對話框「怎麼把自己重畫一次」。每個開啟路徑都會設定它；沒有對話框
+// 開著時 repaintModal() 會自己清掉。只有主題變動會用到。
+let _modalRepaint=null;
+
+function repaintModal(){
+  const open=document.querySelector(".modal-overlay");
+  if(!open){_modalRepaint=null;return;}
+  if(typeof _modalRepaint!=="function")return;
+  const keep=[...open.querySelectorAll("input,textarea,select")]
+    .filter(el=>el.id)
+    .map(el=>[el.id, el.type==="checkbox"?el.checked:el.value]);
+  _modalRepaint();
+  const now=document.querySelector(".modal-overlay");
+  if(!now)return;
+  for(const [id,v] of keep){
+    const el=now.querySelector("#"+CSS.escape(id));
+    if(!el)continue;
+    if(el.type==="checkbox")el.checked=v; else el.value=v;
+  }
+}
 
 // 使用者輸入會被塞進 innerHTML，一律先跳脫。匯入的備份也可能帶進標記，
 // 所以這不只是顯示問題（src/views.js 用的是同一個函式）。
@@ -2135,6 +2162,7 @@ let _editingQuest=null;
 let _modalRewards=[];
 
 function showQuestModal(s){
+  _modalRepaint=()=>showQuestModal(s);
   const existing=document.getElementById("modal");if(existing)existing.remove();
   const isNew=!s;
   _modalRewards=s?s.rewards.map(r=>({...r})):[];
@@ -2485,7 +2513,10 @@ function boot(){
 window.boot=boot;
 window.leaveToday=leaveToday;
 // 系統主題變動時 views.js 會回頭要一次重畫：資料色的亮度是渲染時算的。
-window.rerender=render;
+// 對話框掛在 document.body 上，不在 #content 裡，只重畫 #content 的話它會留著
+// 開啟當下算出來的深色色碼。所以連開著的對話框一起重畫，並且把使用者填到一半
+// 的內容帶回去——主題變了就清空輸入，比顏色不對更糟。
+window.rerender=()=>{render();repaintModal();};
 
 // 模組沒載入就沒有資料層。顯示一份空白的預設資料會讓人以為資料不見了，
 // 不如直接說清楚原因。

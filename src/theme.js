@@ -47,10 +47,13 @@ export function watchSystemTheme(win, onChange){
 // 在線性空間等比縮放三個通道：亮度剛好落到目標值，色相與彩度都保留。
 const HEX_FULL = /^#[0-9a-fA-F]{6}$/;
 
-// 淺色底色 #f5f2ea 的相對亮度是 0.8886，門檻取 0.158 時對比 4.51:1，剛好過
-// WCAG AA 的 4.5:1。底色改了就要一起改，test/theme.test.js 會把這條算式跑出來。
-export const LIGHT_BG = "#f5f2ea";
-export const LIGHT_MAX_LUMINANCE = 0.158;
+// 基準取的是**資料色會被畫在上面的最深那個表面**，不是頁面底色。核心卡與統計
+// 區塊的背景是 --bg3（#e3ddcd，亮度 0.7245），比 --bg（#f5f2ea，0.8886）深；
+// 拿頁面底色當基準的話，卡片上的對比只剩 3.72:1，等於這條保證在大多數卡片上
+// 不成立。0.122 是 #e3ddcd 對 4.5:1 反推出來的上限，對更亮的表面只會更好。
+// 表面色改了就要一起改，test/theme.test.js 會把所有淺色表面都算一次。
+export const LIGHT_SURFACE = "#e3ddcd";
+export const LIGHT_MAX_LUMINANCE = 0.120;
 
 function toLinear(v){
   const c = v / 255;
