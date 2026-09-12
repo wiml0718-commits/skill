@@ -586,6 +586,10 @@ export const MAX_MINUTES = 120;
 export const MINUTE_CHOICES = [0, 5, 15, 25, 60, 120];
 export const GOAL_BINDING_KEYS = ["ai", "video"];
 
+// 外觀主題。auto = 交給 prefers-color-scheme，light／dark = 使用者明確指定。
+export const THEME = {AUTO: "auto", LIGHT: "light", DARK: "dark"};
+const ALL_THEME = Object.values(THEME);
+
 export const PLANNER_LIMITS = {
   changeReason: 300,
   stepDetail: 1000,
@@ -644,7 +648,7 @@ export function normalizeOutcomeUrl(v){
 // anchorDate 與 anchorPhase 少了任一個都算不出 phase。只留半組會讓畫面誤判
 // 「已設定班表」，所以一併收斂成未設定。
 export function createPlannerConfig({anchorDate = null, anchorPhase = null,
-                                     goalBindings = null} = {}){
+                                     goalBindings = null, theme = null} = {}){
   const date = anchorDate ? normalizeDue(anchorDate) : null;
   let phase = null;
   if(anchorPhase !== null && anchorPhase !== undefined && anchorPhase !== ""){
@@ -663,7 +667,16 @@ export function createPlannerConfig({anchorDate = null, anchorPhase = null,
     anchorDate: paired ? date : null,
     anchorPhase: paired ? phase : null,
     goalBindings: bindings,
+    theme: normalizeTheme(theme),
   };
+}
+
+// 主題是純外觀，壞掉的值不該讓整份 config 被丟回預設值（那會連 anchor 一起
+// 失去，§store restorePlanner）。因此這裡不丟例外，只把三種壞法各自擋掉：
+// 缺席（undefined／null）、空值（""）、型別偽裝（陣列、物件、數字都不是
+// 合法主題字串）。都退回 auto。
+export function normalizeTheme(v){
+  return typeof v === "string" && ALL_THEME.includes(v) ? v : THEME.AUTO;
 }
 
 export function createPlannerFocus({goalId, stepId, acceptedAt = null} = {}){

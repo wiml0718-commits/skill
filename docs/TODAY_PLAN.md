@@ -101,7 +101,8 @@
     "config": {
       "anchorDate": null,
       "anchorPhase": null,
-      "goalBindings": {"ai": null, "video": null}
+      "goalBindings": {"ai": null, "video": null},
+      "theme": "auto"
     },
     "days": {},
     "stepDetails": {},
@@ -121,6 +122,7 @@
 | `days[date].focus` | null 或 `{goalId, stepId, acceptedAt}` |
 | `days[date].changeReason` | 選填文字，最多 300 字元 |
 | `days[date].updatedAt` | ISO instant |
+| `config.theme` | auto／light／dark；壞值退回 auto，不丟例外（見 [`THEME.md`](THEME.md)） |
 | `stepDetails[stepId]` | `{firstAction, minimumAction, completionCriteria}`，各最多 1,000 字元 |
 | `entries[]` | `{id, requestId, day, goalId, stepId, outcome, note, nextAction, url, createdAt}` |
 
